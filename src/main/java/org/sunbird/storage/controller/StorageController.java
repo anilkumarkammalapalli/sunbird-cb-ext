@@ -111,4 +111,11 @@ public class StorageController {
 	public ResponseEntity<?> downloadCiosLogsFile(@PathVariable("fileName") String fileName) {
 		return storageService.downloadCiosLogsFile(fileName);
 	}
+
+	@PostMapping("/uploadContent/{contentId}")
+	public ResponseEntity<?> uploadContent(@RequestParam(value = "file", required = true) MultipartFile multipartFile, @PathVariable("contentId") String contentId)
+			throws IOException {
+		SBApiResponse uploadResponse = storageService.contentUpload(multipartFile, serverConfig.getCloudContentContainer(), serverConfig.getContentFolder(),contentId);
+		return new ResponseEntity<>(uploadResponse, uploadResponse.getResponseCode());
+	}
 }

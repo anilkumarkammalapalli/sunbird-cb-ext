@@ -586,4 +586,27 @@ public class StorageServiceImpl implements StorageService {
 		}
 	}
 
+	public SBApiResponse contentUpload (MultipartFile mFile, String containerName, String cloudFolderName, String
+			contentId){
+		SBApiResponse response = ProjectUtil.createDefaultResponse(Constants.API_FILE_UPLOAD);
+		File file = null;
+		try {
+			file = new File(contentId);
+			file.createNewFile();
+			FileOutputStream fos = new FileOutputStream(file);
+			fos.write(mFile.getBytes());
+			fos.close();
+			return uploadFile(file, cloudFolderName, containerName);
+		} catch (Exception e) {
+			logger.error("Failed to upload file. Exception: ", e);
+			response.getParams().setStatus(Constants.FAILED);
+			response.getParams().setErrmsg("Failed to upload file. Exception: " + e.getMessage());
+			response.setResponseCode(HttpStatus.INTERNAL_SERVER_ERROR);
+			return response;
+		} finally {
+			if (file != null) {
+				file.delete();
+			}
+		}
+	}
 }

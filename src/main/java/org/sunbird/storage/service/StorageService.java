@@ -40,4 +40,6 @@ public interface StorageService {
 	SBApiResponse uploadCiosLogsFile(String logFilePath,String fileName, String containerName, String cloudFolderName);
 
 	ResponseEntity<?> downloadCiosLogsFile(String fileName);
+
+	SBApiResponse contentUpload(MultipartFile mFile, String containerName, String cloudFolderName, String contentId);
 }

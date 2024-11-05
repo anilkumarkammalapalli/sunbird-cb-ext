@@ -937,6 +937,12 @@ public class CbExtServerProperties {
 	@Value("${user.event.karma.point.topic}")
 	private String userEventKarmaPointTopic;
 
+	@Value("${cloud.content.folder}")
+	private String contentFolder;
+
+	@Value("${cloud.content.container.name}")
+	private String cloudContentContainer;
+
 	public String getCiosCloudIconFolderName() {
 		return ciosCloudIconFolderName;
 	}
@@ -3229,5 +3235,13 @@ public class CbExtServerProperties {
 
 	public void setUserEventKarmaPointTopic(String userEventKarmaPointTopic) {
 		this.userEventKarmaPointTopic = userEventKarmaPointTopic;
+	}
+
+	public String getContentFolder() {
+		return contentFolder;
+	}
+
+	public String getCloudContentContainer() {
+		return cloudContentContainer;
 	}
 }
