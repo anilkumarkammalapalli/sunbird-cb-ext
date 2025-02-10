@@ -662,7 +662,7 @@ public class OrgDesignationMappingServiceImpl implements OrgDesignationMappingSe
                         if (nextRow.getCell(0).getCellType() == CellType.STRING) {
                             String designation = nextRow.getCell(0).getStringCellValue().trim();
                             logger.info("Bulk upload desingation: "  + designation);
-                            if (CollectionUtils.isNotEmpty(orgDesignation) && orgDesignation.contains(designation)) {
+                            if (CollectionUtils.isNotEmpty(orgDesignation) && orgDesignation.contains(designation) && false) {
                                 logger.info("The orgDesignation size: " + orgDesignation.size());
                                 if (CollectionUtils.isNotEmpty(orgFrameworkTerms)) {
                                     List<Map<String, Object>> associations = (List<Map<String, Object>>) orgFrameworkTerms.get(0).get(Constants.ASSOCIATIONS);
