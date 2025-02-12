@@ -351,7 +351,7 @@ public class InsightsServiceImpl implements InsightsService {
             log.warn("User profile details are missing in the provided user data.");
             response.getParams().setStatus(FAILED);
             response.put(MESSAGE, "User profile details are missing.");
-            response.setResponseCode(HttpStatus.BAD_REQUEST);
+            response.setResponseCode(HttpStatus.OK);
             return null;
         }
         JsonNode professionalDetailsArray = profileDetails.get("professionalDetails");
@@ -359,7 +359,7 @@ public class InsightsServiceImpl implements InsightsService {
             log.warn("Professional details are missing or not an array in the user profile.");
             response.getParams().setStatus(FAILED);
             response.put(MESSAGE, "User professional details are not available");
-            response.setResponseCode(HttpStatus.BAD_REQUEST);
+            response.setResponseCode(HttpStatus.OK);
             return null;
         }
         JsonNode professionalDetails = professionalDetailsArray.get(0);
@@ -368,14 +368,14 @@ public class InsightsServiceImpl implements InsightsService {
             log.warn("Professional details are missing in the user profile.");
             response.getParams().setStatus(FAILED);
             response.put(MESSAGE, "Professional details entry is unavailable for the user");
-            response.setResponseCode(HttpStatus.BAD_REQUEST);
+            response.setResponseCode(HttpStatus.OK);
             return null;
         }
         JsonNode designationNode = professionalDetails.get(DESIGNATION);
         if(designationNode == null ||CollectionUtils.isEmpty(Collections.singleton(designationNode))) {
             response.getParams().setStatus(FAILED);
             response.put(MESSAGE, "Designation is unavailable for the user");
-            response.setResponseCode(HttpStatus.BAD_REQUEST);
+            response.setResponseCode(HttpStatus.OK);
             log.warn("Designation is missing in professional details.");
             return null;
         }
