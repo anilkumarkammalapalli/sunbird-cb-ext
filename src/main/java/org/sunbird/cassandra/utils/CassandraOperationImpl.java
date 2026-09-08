@@ -115,6 +115,23 @@ public class CassandraOperationImpl implements CassandraOperation {
 	}
 
 	@Override
+	public List<Map<String, Object>> getRecordsByPropertiesWithConsistencyLevel(String keyspaceName, String tableName,
+			Map<String, Object> propertyMap, List<String> fields, ConsistencyLevel consistencyLevel) {
+		List<Map<String, Object>> response = new ArrayList<>();
+		try {
+			Select selectQuery = processQuery(keyspaceName, tableName, propertyMap, fields);
+			if (consistencyLevel != null) {
+				selectQuery.setConsistencyLevel(consistencyLevel);
+			}
+			ResultSet results = connectionManager.getSession(keyspaceName).execute(selectQuery);
+			response = CassandraUtil.createResponse(results);
+		} catch (Exception e) {
+			logger.error(Constants.EXCEPTION_MSG_FETCH + tableName + " : " + e.getMessage(), e);
+		}
+		return response;
+	}
+
+	@Override
 	public Map<String, Object> getRecordsByProperties(String keyspaceName, String tableName,
 			Map<String, Object> propertyMap, List<String> fields, String key) {
 		Select selectQuery = null;

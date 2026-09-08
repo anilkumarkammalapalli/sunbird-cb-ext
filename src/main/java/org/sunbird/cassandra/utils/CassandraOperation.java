@@ -60,6 +60,24 @@ public interface CassandraOperation {
 			Map<String, Object> propertyMap, List<String> fields);
 
 	/**
+	 * Same as {@link #getRecordsByProperties(String, String, Map, List)} but executes the read at the
+	 * supplied {@link com.datastax.driver.core.ConsistencyLevel}, overriding the cluster-wide default
+	 * for this statement only. Used by strong-read paths such as the karma coin redeem validation,
+	 * where a read off a stale replica could authorise an invalid conversion. A {@code null} level
+	 * falls back to the cluster default.
+	 *
+	 * @param keyspaceName     Keyspace name
+	 * @param tableName        Table name
+	 * @param propertyMap      Map describing columns to be used in where clause of select query.
+	 * @param fields           List of columns to be returned in each record
+	 * @param consistencyLevel Consistency level to apply to this read (e.g. {@code QUORUM})
+	 * @return List consisting of fetched records
+	 */
+	List<Map<String, Object>> getRecordsByPropertiesWithConsistencyLevel(String keyspaceName, String tableName,
+			Map<String, Object> propertyMap, List<String> fields,
+			com.datastax.driver.core.ConsistencyLevel consistencyLevel);
+
+	/**
 	 * @param keyspaceName Keyspace name
 	 * @param tableName    Table name
 	 * @param keyMap       Column map for composite primary key

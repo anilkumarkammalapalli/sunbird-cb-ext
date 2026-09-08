@@ -3,7 +3,6 @@ package org.sunbird.karmacoinwallet.service;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -19,6 +18,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import com.datastax.driver.core.ConsistencyLevel;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -40,7 +40,7 @@ public class KarmaCoinWalletServiceImplTest {
     private static final String USER_ID = "user-123";
     private static final String AUTHORIZED_ROLE = "PUBLIC";
     private static final int MONTHLY_CAP = 100;
-    private static final int REDIS_TTL = 3600;
+    private static final int DEDUP_TTL = 3;
 
     @Mock
     private CassandraOperation cassandraOperation;
@@ -97,33 +97,40 @@ public class KarmaCoinWalletServiceImplTest {
 
     /**
      * Stubs the wallet / monthly-summary / karma-points Cassandra reads used by the summary and
-     * redeem flows. Redis cache is treated as a miss so the values come from Cassandra.
+     * redeem flows. All three are read fresh at QUORUM (no cache).
      */
     private void mockCassandraWallet(int totalEarned, int totalRedeemed, int convertedThisMonth,
             int totalKarmaPoints) {
-        when(redisCacheMgr.getCache(Constants.REDIS_KEY_KARMA_COINS + USER_ID)).thenReturn(null);
-
         Map<String, Object> walletRow = new HashMap<>();
         walletRow.put(Constants.TOTAL_EARNED, totalEarned);
         walletRow.put(Constants.TOTAL_REDEEMED, totalRedeemed);
-        when(cassandraOperation.getRecordsByProperties(eq(Constants.KEYSPACE_SUNBIRD),
-                eq(Constants.TABLE_USER_KARMA_COIN_WALLET), anyMap(), anyList()))
+        when(cassandraOperation.getRecordsByPropertiesWithConsistencyLevel(eq(Constants.KEYSPACE_SUNBIRD),
+                eq(Constants.TABLE_USER_KARMA_COIN_WALLET), anyMap(), anyList(), eq(ConsistencyLevel.QUORUM)))
                 .thenReturn(Collections.singletonList(walletRow));
 
         Map<String, Object> monthlyRow = new HashMap<>();
         monthlyRow.put(Constants.POINTS_CONVERTED, convertedThisMonth);
-        when(cassandraOperation.getRecordsByProperties(eq(Constants.KEYSPACE_SUNBIRD),
-                eq(Constants.TABLE_USER_KARMA_COIN_MONTHLY_SUMMARY), anyMap(), anyList()))
+        when(cassandraOperation.getRecordsByPropertiesWithConsistencyLevel(eq(Constants.KEYSPACE_SUNBIRD),
+                eq(Constants.TABLE_USER_KARMA_COIN_MONTHLY_SUMMARY), anyMap(), anyList(), eq(ConsistencyLevel.QUORUM)))
                 .thenReturn(Collections.singletonList(monthlyRow));
 
         Map<String, Object> pointsRow = new HashMap<>();
         pointsRow.put(Constants.TOTAL_POINTS, totalKarmaPoints);
-        when(cassandraOperation.getRecordsByProperties(eq(Constants.KEYSPACE_SUNBIRD),
-                eq(Constants.TABLE_USER_KARMA_POINTS_SUMMARY), anyMap(), anyList()))
+        when(cassandraOperation.getRecordsByPropertiesWithConsistencyLevel(eq(Constants.KEYSPACE_SUNBIRD),
+                eq(Constants.TABLE_USER_KARMA_POINTS_SUMMARY), anyMap(), anyList(), eq(ConsistencyLevel.QUORUM)))
                 .thenReturn(Collections.singletonList(pointsRow));
 
         when(serverProperties.getKarmaCoinMonthlyCap()).thenReturn(MONTHLY_CAP);
-        when(serverProperties.getKarmaCoinWalletRedisTtl()).thenReturn(REDIS_TTL);
+    }
+
+    /**
+     * Stubs the redeem dedup guard (Redis {@code SET NX EX}, keyed by userId only) to either grant
+     * or deny the claim.
+     */
+    private void mockDedupGuard(boolean claimed) {
+        when(serverProperties.getKarmaCoinWalletRedeemDedupTtl()).thenReturn(DEDUP_TTL);
+        when(redisCacheMgr.setIfAbsent(eq(Constants.REDIS_KEY_KARMA_REDEEM_LOCK + USER_ID), anyString(),
+                eq(DEDUP_TTL))).thenReturn(claimed);
     }
 
     // ------------------------------------------------------------------
@@ -175,9 +182,6 @@ public class KarmaCoinWalletServiceImplTest {
         assertEquals(Boolean.TRUE, result.get(Constants.REDEEM_ENABLED));
         assertEquals(YearMonth.now().toString(), result.get(Constants.YEAR_MONTH_CAMEL));
         assertNotNull(result.get(Constants.CAP_RESETS_ON));
-        // cache miss => value re-cached
-        verify(redisCacheMgr).putStringInCache(eq(Constants.REDIS_KEY_KARMA_COINS + USER_ID),
-                anyString(), eq(REDIS_TTL));
     }
 
     @Test
@@ -194,35 +198,26 @@ public class KarmaCoinWalletServiceImplTest {
     }
 
     @Test
-    public void getWalletSummary_usesCacheWhenYearMonthMatches() {
+    public void getWalletSummary_alwaysReadsFreshFromCassandra() {
         mockAuthenticatedAndAuthorized();
-        String cached = "{\"totalEarned\":40,\"totalRedeemed\":10,\"convertedThisMonth\":20,\"yearMonth\":\""
-                + YearMonth.now().toString() + "\"}";
-        when(redisCacheMgr.getCache(Constants.REDIS_KEY_KARMA_COINS + USER_ID)).thenReturn(cached);
-        when(serverProperties.getKarmaCoinMonthlyCap()).thenReturn(MONTHLY_CAP);
-        // karma points summary is always read from Cassandra (not cached)
-        Map<String, Object> pointsRow = new HashMap<>();
-        pointsRow.put(Constants.TOTAL_POINTS, 100);
-        when(cassandraOperation.getRecordsByProperties(eq(Constants.KEYSPACE_SUNBIRD),
-                eq(Constants.TABLE_USER_KARMA_POINTS_SUMMARY), anyMap(), anyList()))
-                .thenReturn(Collections.singletonList(pointsRow));
+        mockCassandraWallet(40, 10, 20, 100);
 
-        SBApiResponse response = service.getWalletSummary(TOKEN);
+        service.getWalletSummary(TOKEN);
+        service.getWalletSummary(TOKEN);
 
-        assertEquals(HttpStatus.OK, response.getResponseCode());
-        assertEquals(30, response.getResult().get(Constants.WALLET_BALANCE));
-        // wallet & monthly tables must NOT be hit when the cache is warm
-        verify(cassandraOperation, never()).getRecordsByProperties(eq(Constants.KEYSPACE_SUNBIRD),
-                eq(Constants.TABLE_USER_KARMA_COIN_WALLET), anyMap(), anyList());
-        verify(redisCacheMgr, never()).putStringInCache(anyString(), anyString(), anyInt());
+        // no caching: every call re-reads the wallet table at QUORUM
+        verify(cassandraOperation, org.mockito.Mockito.times(2)).getRecordsByPropertiesWithConsistencyLevel(
+                eq(Constants.KEYSPACE_SUNBIRD), eq(Constants.TABLE_USER_KARMA_COIN_WALLET), anyMap(), anyList(),
+                eq(ConsistencyLevel.QUORUM));
+        verify(redisCacheMgr, never()).getCache(anyString());
+        verify(redisCacheMgr, never()).putStringInCache(anyString(), anyString(), org.mockito.ArgumentMatchers.anyInt());
     }
 
     @Test
     public void getWalletSummary_cassandraThrows_returnsInternalServerError() {
         mockAuthenticatedAndAuthorized();
-        when(redisCacheMgr.getCache(anyString())).thenReturn(null);
-        when(cassandraOperation.getRecordsByProperties(anyString(), anyString(), anyMap(), anyList()))
-                .thenThrow(new RuntimeException("cassandra down"));
+        when(cassandraOperation.getRecordsByPropertiesWithConsistencyLevel(anyString(), anyString(), anyMap(),
+                anyList(), any(ConsistencyLevel.class))).thenThrow(new RuntimeException("cassandra down"));
 
         SBApiResponse response = service.getWalletSummary(TOKEN);
 
@@ -367,6 +362,10 @@ public class KarmaCoinWalletServiceImplTest {
         return row;
     }
 
+    // ------------------------------------------------------------------
+    // redeem
+    // ------------------------------------------------------------------
+
     private Map<String, Object> redeemRequest(Object points, Object requestId) {
         Map<String, Object> request = new HashMap<>();
         if (points != null) {
@@ -435,8 +434,25 @@ public class KarmaCoinWalletServiceImplTest {
     }
 
     @Test
+    public void redeem_duplicateInProgress_returnsConflict() {
+        mockAuthenticatedAndAuthorized();
+        // dedup guard denies the claim => another redeem for this user is already in flight
+        mockDedupGuard(false);
+
+        SBApiResponse response = service.redeem(TOKEN, redeemRequest(10, "req-1"));
+
+        assertEquals(HttpStatus.CONFLICT, response.getResponseCode());
+        assertEquals(Constants.CONVERSION_REQUEST_IN_PROGRESS, response.getParams().getErrmsg());
+        verify(kafkaProducer, never()).push(anyString(), anyString(), any());
+        // the guard is per-user, not per-request: no wallet/points reads should happen once denied
+        verify(cassandraOperation, never()).getRecordsByPropertiesWithConsistencyLevel(anyString(), anyString(),
+                anyMap(), anyList(), any(ConsistencyLevel.class));
+    }
+
+    @Test
     public void redeem_exceedsConvertibleCap_returnsBadRequest() {
         mockAuthenticatedAndAuthorized();
+        mockDedupGuard(true);
         // convertible = min(cap-converted=80, unredeemed=60) = 60; asking for 61
         mockCassandraWallet(40, 10, 20, 100);
 
@@ -451,19 +467,15 @@ public class KarmaCoinWalletServiceImplTest {
     @SuppressWarnings("unchecked")
     public void redeem_success_pushesEventAndReturnsAccepted() {
         mockAuthenticatedAndAuthorized();
+        mockDedupGuard(true);
         mockCassandraWallet(40, 10, 20, 100);
         when(serverProperties.getKarmaCoinWalletRedeemTopic()).thenReturn("karma-redeem-topic");
-        // claim applied => first time seeing this request
-        when(cassandraOperation.insertRecordIfNotExists(eq(Constants.KEYSPACE_SUNBIRD),
-                eq(Constants.USER_KARMA_COIN_LOOKUP), anyMap())).thenReturn(true);
+        when(serverProperties.getKarmaCoinWalletRedeemEventVersion()).thenReturn(1);
 
         SBApiResponse response = service.redeem(TOKEN, redeemRequest(50, "req-1"));
 
         assertEquals(HttpStatus.ACCEPTED, response.getResponseCode());
         assertEquals(Constants.ACCEPTED, response.getParams().getStatus());
-        // the PROCESSING claim row must be written before publishing
-        verify(cassandraOperation).insertRecordIfNotExists(eq(Constants.KEYSPACE_SUNBIRD),
-                eq(Constants.USER_KARMA_COIN_LOOKUP), anyMap());
         Map<String, Object> result = response.getResult();
         assertEquals("req-1", result.get(Constants.REQUEST_ID));
         assertEquals(Constants.PROCESSING, result.get(Constants.STATUS));
@@ -471,14 +483,16 @@ public class KarmaCoinWalletServiceImplTest {
         ArgumentCaptor<Object> eventCaptor = ArgumentCaptor.forClass(Object.class);
         verify(kafkaProducer).push(eq("karma-redeem-topic"), eq(USER_ID), eventCaptor.capture());
 
-        // Envelope: { eventType, data: { ... } }
+        // Envelope: { eventType, data: { ... }, version }
         Map<String, Object> event = (Map<String, Object>) eventCaptor.getValue();
         assertEquals(Constants.POINTS_CONVERSION, event.get(Constants.EVENT_TYPE));
+        assertEquals(1, event.get(Constants.EVENT_VERSION));
         Map<String, Object> data = (Map<String, Object>) event.get(Constants.DATA);
         assertNotNull(data);
         assertEquals(Constants.KARMA_COIN_CREDIT_EID, data.get(Constants.EVENT_EID));
         assertEquals(USER_ID, data.get(Constants.USER_ID));
         assertEquals("req-1", data.get(Constants.REQUEST_ID));
+        assertNotNull(data.get(Constants.EVENT_ID));
         assertEquals(Constants.TXN_TYPE_CREDIT, data.get(Constants.OPERATION));
         assertEquals(Constants.POINTS_CONVERSION, data.get(Constants.ACTION_TYPE_CAMEL));
         assertEquals(50, data.get(Constants.POINTS_TO_CONVERT));
@@ -489,12 +503,11 @@ public class KarmaCoinWalletServiceImplTest {
     }
 
     @Test
-    public void redeem_kafkaThrows_marksFailedAndReturnsInternalServerError() {
+    public void redeem_kafkaThrows_returnsInternalServerError() {
         mockAuthenticatedAndAuthorized();
+        mockDedupGuard(true);
         mockCassandraWallet(40, 10, 20, 100);
         when(serverProperties.getKarmaCoinWalletRedeemTopic()).thenReturn("karma-redeem-topic");
-        when(cassandraOperation.insertRecordIfNotExists(eq(Constants.KEYSPACE_SUNBIRD),
-                eq(Constants.USER_KARMA_COIN_LOOKUP), anyMap())).thenReturn(true);
         org.mockito.Mockito.doThrow(new RuntimeException("kafka down"))
                 .when(kafkaProducer).push(anyString(), anyString(), any());
 
@@ -502,34 +515,6 @@ public class KarmaCoinWalletServiceImplTest {
 
         assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, response.getResponseCode());
         assertEquals(Constants.FAILED, response.getParams().getStatus());
-        // claim was applied, so the row is overwritten to a FAILED terminal state (plain insert)
-        verify(cassandraOperation).insertRecord(eq(Constants.KEYSPACE_SUNBIRD),
-                eq(Constants.USER_KARMA_COIN_LOOKUP), anyMap());
-    }
-
-    @Test
-    public void redeem_duplicateRequestId_returnsExistingStatusWithoutPublishing() {
-        mockAuthenticatedAndAuthorized();
-        mockCassandraWallet(40, 10, 20, 100);
-        // claim NOT applied => duplicate requestId already seen
-        when(cassandraOperation.insertRecordIfNotExists(eq(Constants.KEYSPACE_SUNBIRD),
-                eq(Constants.USER_KARMA_COIN_LOOKUP), anyMap())).thenReturn(false);
-        // existing lookup row already SUCCESS
-        Map<String, Object> lookupRow = new HashMap<>();
-        lookupRow.put(Constants.ADDINFO,
-                "{\"status\":\"SUCCESS\",\"transactionId\":\"TXN-1\",\"pointsConverted\":50}");
-        when(cassandraOperation.getRecordsByProperties(eq(Constants.KEYSPACE_SUNBIRD),
-                eq(Constants.USER_KARMA_COIN_LOOKUP), anyMap(), any()))
-                .thenReturn(Collections.singletonList(lookupRow));
-
-        SBApiResponse response = service.redeem(TOKEN, redeemRequest(50, "req-1"));
-
-        assertEquals(HttpStatus.OK, response.getResponseCode());
-        Map<String, Object> result = response.getResult();
-        assertEquals("req-1", result.get(Constants.REQUEST_ID));
-        assertEquals("SUCCESS", result.get(Constants.STATUS));
-        // must NOT republish the event on a duplicate
-        verify(kafkaProducer, never()).push(anyString(), anyString(), any());
     }
 
     // ------------------------------------------------------------------

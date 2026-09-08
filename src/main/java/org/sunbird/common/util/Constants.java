@@ -992,6 +992,7 @@ public class Constants {
 	public static final String YEAR_MONTH = "year_month";
 	public static final String POINTS_CONVERTED = "points_converted";
 	public static final String REDIS_KEY_KARMA_COINS = "user:karmaCoins:";
+	public static final String REDIS_KEY_KARMA_REDEEM_LOCK = "user:karmaRedeemLock:";
 	public static final String API_KARMA_WALLET_SUMMARY = "api.karma.wallet.summary";
 	// Karma Coin Wallet - summary response fields
 	public static final String WALLET_BALANCE = "walletBalance";
@@ -1794,8 +1795,10 @@ public class Constants {
 	public static final String PROCESSING = "PROCESSING";
 	public static final String ACCEPTED = "ACCEPTED";
 	public static final String MONTHLY_CAP_EXCEEDED = "MONTHLY_CAP_EXCEEDED";
+	public static final String REDEEM_REQUEST_IN_PROGRESS = "A redeem request is already in progress. Please wait a few seconds and try again.";
 	public static final String EVENT_EID = "eid";
 	public static final String EVENT_ETS = "ets";
+	public static final String EVENT_VERSION = "version";
 	public static final String OPERATION = "operation";
 	public static final String KARMA_COIN_CREDIT_EID = "KARMA_COIN_CREDIT";
 	public static final String CONVERSION_PERIOD = "conversionPeriod";
@@ -1808,4 +1811,6 @@ public class Constants {
 	public static final String ERROR_MESSAGE_CAMEL = "errorMessage";
 	public static final String REDEEM_REQUEST_NOT_FOUND = "Redeem request not found";
 	public static final String FAILED_TO_PROCESS_KARMA_COIN_REDEMPTION = "Failed to process karma coin redemption";
+	public static final String CONVERSION_REQUEST_IN_PROGRESS = "CONVERSION_REQUEST_IN_PROGRESS";
+	public static final String ONE = "1";
 }
