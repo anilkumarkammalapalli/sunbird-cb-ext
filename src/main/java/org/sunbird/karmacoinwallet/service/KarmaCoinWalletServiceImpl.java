@@ -207,7 +207,7 @@ public class KarmaCoinWalletServiceImpl implements KarmaCoinWalletService {
                 ? Constants.TXN_TYPE_ALL
                 : typeValue.toString().toUpperCase(Locale.ENGLISH);
         if (Constants.TXN_TYPE_ALL.equals(type) || Constants.TXN_TYPE_CREDIT.equals(type)
-                || Constants.TXN_TYPE_DEBIT.equals(type)) {
+                || Constants.TXN_TYPE_DEBIT.equals(type) || Constants.TXN_TYPE_PENDING.equals(type)) {
             return type;
         }
         return null;

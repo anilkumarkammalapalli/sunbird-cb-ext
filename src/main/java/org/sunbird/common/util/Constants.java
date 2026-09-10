@@ -1020,6 +1020,7 @@ public class Constants {
 	public static final String TXN_TYPE_ALL = "ALL";
 	public static final String TXN_TYPE_CREDIT = "CREDIT";
 	public static final String TXN_TYPE_DEBIT = "DEBIT";
+	public static final String TXN_TYPE_PENDING = "PENDING";
 	public static final String TRANSACTIONS = "transactions";
 	public static final String TRANSACTION_ID_CAMEL = "transactionId";
 	public static final String DATE_CAMEL = "date";
