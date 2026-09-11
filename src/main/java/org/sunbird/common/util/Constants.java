@@ -1814,4 +1814,7 @@ public class Constants {
 	public static final String FAILED_TO_PROCESS_KARMA_COIN_REDEMPTION = "Failed to process karma coin redemption";
 	public static final String CONVERSION_REQUEST_IN_PROGRESS = "CONVERSION_REQUEST_IN_PROGRESS";
 	public static final String ONE = "1";
+	public static final String IN_PROGRESS = "IN_PROGRESS";
+	public static final String PIPE_SEPARATOR = "|";
+	public static final String TXN_STATUS_IN_PROGRESS = "IN_PROGRESS";
 }

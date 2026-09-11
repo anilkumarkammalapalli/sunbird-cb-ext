@@ -1393,6 +1393,12 @@ public class CbExtServerProperties {
 	@Value("${karma.coin.wallet.redeem.topic}")
 	private String karmaCoinWalletRedeemTopic;
 
+	@Value("${karma.coin.convert.lock.ttl:900}")
+	private Integer karmaCoinConvertLockTtl;
+
+	@Value("${karma.coin.convert.lock.key.pattern:karmaCoinConvertLock:{userId}}")
+	private String karmaCoinConvertLockKeyPattern;
+
 	public int getUserSearchLimit() {
 		return userSearchLimit;
 	}
@@ -4744,5 +4750,13 @@ public class CbExtServerProperties {
 
 	public String getKarmaCoinWalletRedeemTopic() {
 		return karmaCoinWalletRedeemTopic;
+	}
+
+	public Integer getKarmaCoinConvertLockTtl() {
+			return karmaCoinConvertLockTtl;
+	}
+
+	public String getKarmaCoinConvertLockKeyPattern() {
+		return karmaCoinConvertLockKeyPattern;
 	}
 }

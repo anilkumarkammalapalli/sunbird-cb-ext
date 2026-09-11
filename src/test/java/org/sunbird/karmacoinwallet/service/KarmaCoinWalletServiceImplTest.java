@@ -63,6 +63,7 @@ public class KarmaCoinWalletServiceImplTest {
     @BeforeEach
     public void setUp() {
         MockitoAnnotations.initMocks(this);
+        when(serverProperties.getKarmaCoinConvertLockKeyPattern()).thenReturn("karmaCoinConvertLock:{userId}");
     }
 
     private void mockAuthenticatedAndAuthorized() {
@@ -124,13 +125,13 @@ public class KarmaCoinWalletServiceImplTest {
     }
 
     /**
-     * Stubs the redeem dedup guard (Redis {@code SET NX EX}, keyed by userId only) to either grant
-     * or deny the claim.
+     * Stubs the conversion in-progress lock (Redis {@code SET NX EX}, keyed by userId only) to
+     * either grant or deny the claim.
      */
     private void mockDedupGuard(boolean claimed) {
-        when(serverProperties.getKarmaCoinWalletRedeemDedupTtl()).thenReturn(DEDUP_TTL);
-        when(redisCacheMgr.setIfAbsent(eq(Constants.REDIS_KEY_KARMA_REDEEM_LOCK + USER_ID), anyString(),
-                eq(DEDUP_TTL))).thenReturn(claimed);
+        when(serverProperties.getKarmaCoinConvertLockTtl()).thenReturn(DEDUP_TTL);
+        when(redisCacheMgr.setIfAbsent(eq("karmaCoinConvertLock:" + USER_ID),
+                eq(Constants.IN_PROGRESS), eq(DEDUP_TTL))).thenReturn(claimed);
     }
 
     // ------------------------------------------------------------------

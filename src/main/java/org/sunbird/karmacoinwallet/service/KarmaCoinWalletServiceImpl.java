@@ -185,6 +185,10 @@ public class KarmaCoinWalletServiceImpl implements KarmaCoinWalletService {
                 }
                 transactions.add(toTransactionView(row));
             }
+            String userLockKey = buildConvertLockKey(userId);
+            if (redisCacheMgr.keyExists(userLockKey)) {
+                transactions.add(0, buildPendingTransactionView());
+            }
 
             Map<String, Object> result = new HashMap<>();
             result.put(Constants.TRANSACTIONS, transactions);
@@ -340,8 +344,8 @@ public class KarmaCoinWalletServiceImpl implements KarmaCoinWalletService {
             return response;
         }
         try {
-            String dedupeKey = Constants.REDIS_KEY_KARMA_REDEEM_LOCK + userId;
-            boolean requestClaimed = redisCacheMgr.setIfAbsent(dedupeKey, Constants.ONE, serverProperties.getKarmaCoinWalletRedeemDedupTtl());
+            String inProgressKey = buildConvertLockKey(userId);
+            boolean requestClaimed = redisCacheMgr.setIfAbsent(inProgressKey, Constants.IN_PROGRESS, serverProperties.getKarmaCoinConvertLockTtl());
             if (!requestClaimed) {
                 setError(response, Constants.CONVERSION_REQUEST_IN_PROGRESS, HttpStatus.CONFLICT);
                 return response;
@@ -475,5 +479,37 @@ public class KarmaCoinWalletServiceImpl implements KarmaCoinWalletService {
             setError(response, "Failed to fetch karma coin redemption status", HttpStatus.INTERNAL_SERVER_ERROR);
         }
         return response;
+    }
+
+    /**
+     * Builds the Redis key for the per-user conversion in-progress lock from the configured
+     * pattern (default {@code karmaCoinConvertLock:{userId}}). Any {@code {token}} placeholder in
+     * the pattern is resolved from a fixed set of values that are always available wherever this
+     * key is built, so widening the key shape (e.g. to fold in context type) is a config change,
+     * not a code change.
+     */
+    private String buildConvertLockKey(String userId) {
+        Map<String, String> tokens = new HashMap<>();
+        tokens.put("userId", userId);
+        tokens.put("contextType", Constants.POINTS_CONVERSION);
+        String key = serverProperties.getKarmaCoinConvertLockKeyPattern();
+        for (Map.Entry<String, String> token : tokens.entrySet()) {
+            key = key.replace("{" + token.getKey() + "}", token.getValue());
+        }
+        return key;
+    }
+
+    /**
+     * Synthetic view for a conversion that is queued but not yet committed. Not backed by any
+     * Cassandra row — the ledger stays append-only and receives only completed transactions.
+     */
+    private Map<String, Object> buildPendingTransactionView() {
+        Map<String, Object> txn = new HashMap<>();
+        txn.put(Constants.STATUS, Constants.TXN_STATUS_IN_PROGRESS);
+        txn.put(Constants.TYPE, Constants.TXN_TYPE_CREDIT);
+        txn.put(Constants.ACTION_TYPE_CAMEL, Constants.POINTS_CONVERSION);
+        txn.put(Constants.CONTEXT_TYPE_CAMEL, Constants.POINTS_CONVERSION);
+        txn.put(Constants.DATE_CAMEL, System.currentTimeMillis());
+        return txn;
     }
 }
