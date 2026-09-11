@@ -619,6 +619,10 @@ public class CbExtServerProperties {
 	private int karmaCoinMonthlyCap;
 	@Value("${karma.coin.wallet.redis.ttl}")
 	private int karmaCoinWalletRedisTtl;
+	@Value("${karma.coin.wallet.redeem.dedup.ttl}")
+	private int karmaCoinWalletRedeemDedupTtl;
+	@Value("${karma.coin.wallet.redeem.event.version}")
+	private int karmaCoinWalletRedeemEventVersion;
 	@Value("${karma.coin.wallet.authorized.roles}")
 	private String karmaCoinWalletAuthorizedRoles;
 
@@ -1388,6 +1392,12 @@ public class CbExtServerProperties {
 
 	@Value("${karma.coin.wallet.redeem.topic}")
 	private String karmaCoinWalletRedeemTopic;
+
+	@Value("${karma.coin.convert.lock.ttl:900}")
+	private Integer karmaCoinConvertLockTtl;
+
+	@Value("${karma.coin.convert.lock.key.pattern:karmaCoinConvertLock:{userId}}")
+	private String karmaCoinConvertLockKeyPattern;
 
 	public int getUserSearchLimit() {
 		return userSearchLimit;
@@ -2997,6 +3007,22 @@ public class CbExtServerProperties {
 
 	public int getKarmaCoinWalletRedisTtl() {
 		return karmaCoinWalletRedisTtl;
+	}
+
+	public int getKarmaCoinWalletRedeemDedupTtl() {
+		return karmaCoinWalletRedeemDedupTtl;
+	}
+
+	public void setKarmaCoinWalletRedeemDedupTtl(int karmaCoinWalletRedeemDedupTtl) {
+		this.karmaCoinWalletRedeemDedupTtl = karmaCoinWalletRedeemDedupTtl;
+	}
+
+	public int getKarmaCoinWalletRedeemEventVersion() {
+		return karmaCoinWalletRedeemEventVersion;
+	}
+
+	public void setKarmaCoinWalletRedeemEventVersion(int karmaCoinWalletRedeemEventVersion) {
+		this.karmaCoinWalletRedeemEventVersion = karmaCoinWalletRedeemEventVersion;
 	}
 
 	public void setKarmaCoinWalletRedisTtl(int karmaCoinWalletRedisTtl) {
@@ -4724,5 +4750,13 @@ public class CbExtServerProperties {
 
 	public String getKarmaCoinWalletRedeemTopic() {
 		return karmaCoinWalletRedeemTopic;
+	}
+
+	public Integer getKarmaCoinConvertLockTtl() {
+			return karmaCoinConvertLockTtl;
+	}
+
+	public String getKarmaCoinConvertLockKeyPattern() {
+		return karmaCoinConvertLockKeyPattern;
 	}
 }

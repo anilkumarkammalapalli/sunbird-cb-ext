@@ -3,12 +3,9 @@ package org.sunbird.karmacoinwallet.service;
 import java.time.LocalDate;
 import java.time.YearMonth;
 import java.time.ZoneId;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
+import java.util.*;
 
+import com.datastax.driver.core.ConsistencyLevel;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections4.MapUtils;
 import org.apache.commons.lang.StringUtils;
@@ -188,6 +185,10 @@ public class KarmaCoinWalletServiceImpl implements KarmaCoinWalletService {
                 }
                 transactions.add(toTransactionView(row));
             }
+            String userLockKey = buildConvertLockKey(userId);
+            if (redisCacheMgr.keyExists(userLockKey)) {
+                transactions.add(0, buildPendingTransactionView());
+            }
 
             Map<String, Object> result = new HashMap<>();
             result.put(Constants.TRANSACTIONS, transactions);
@@ -210,7 +211,7 @@ public class KarmaCoinWalletServiceImpl implements KarmaCoinWalletService {
                 ? Constants.TXN_TYPE_ALL
                 : typeValue.toString().toUpperCase(Locale.ENGLISH);
         if (Constants.TXN_TYPE_ALL.equals(type) || Constants.TXN_TYPE_CREDIT.equals(type)
-                || Constants.TXN_TYPE_DEBIT.equals(type)) {
+                || Constants.TXN_TYPE_DEBIT.equals(type) || Constants.TXN_TYPE_PENDING.equals(type)) {
             return type;
         }
         return null;
@@ -241,33 +242,18 @@ public class KarmaCoinWalletServiceImpl implements KarmaCoinWalletService {
     }
 
     /**
-     * Loads {@code totalEarned}, {@code totalRedeemed} and {@code convertedThisMonth} for the
-     * user. The cached JSON is scoped to a year-month, so a month rollover is treated as a miss
-     * and the values are re-read from Cassandra and re-cached.
+     * Loads {@code totalEarned}, {@code totalRedeemed} and {@code convertedThisMonth} straight from
+     * Cassandra at {@code QUORUM}. Not cached: both callers (wallet summary display and redeem
+     * validation) must see the current committed values, not a snapshot that could be stale by up to
+     * the cache TTL.
      */
     private WalletSnapshot loadWalletAndMonthly(String userId, String currentYearMonth) {
-        String cacheKey = Constants.REDIS_KEY_KARMA_COINS + userId;
-        try {
-            String cached = redisCacheMgr.getCache(cacheKey);
-            if (StringUtils.isNotBlank(cached)) {
-                Map<String, Object> cachedMap = objectMapper.readValue(cached, Map.class);
-                if (currentYearMonth.equals(cachedMap.get(Constants.YEAR_MONTH_CAMEL))) {
-                    return new WalletSnapshot(
-                            toInt(cachedMap.get(Constants.TOTAL_EARNED_CAMEL)),
-                            toInt(cachedMap.get(Constants.TOTAL_REDEEMED_CAMEL)),
-                            toInt(cachedMap.get(Constants.CONVERTED_THIS_MONTH)));
-                }
-            }
-        } catch (Exception e) {
-            logger.error("Failed to read karma coin wallet cache for user: " + userId, e);
-        }
-
         int totalEarned = 0;
         int totalRedeemed = 0;
         Map<String, Object> walletProps = new HashMap<>();
         walletProps.put(Constants.KARMA_POINTS_USER_ID, userId);
-        List<Map<String, Object>> walletRows = cassandraOperation.getRecordsByProperties(Constants.KEYSPACE_SUNBIRD,
-                Constants.TABLE_USER_KARMA_COIN_WALLET, walletProps, new ArrayList<>());
+        List<Map<String, Object>> walletRows = cassandraOperation.getRecordsByPropertiesWithConsistencyLevel(Constants.KEYSPACE_SUNBIRD,
+                Constants.TABLE_USER_KARMA_COIN_WALLET, walletProps, new ArrayList<>(), ConsistencyLevel.QUORUM);
         if (CollectionUtils.isNotEmpty(walletRows)) {
             Map<String, Object> wallet = walletRows.get(0);
             totalEarned = toInt(wallet.get(Constants.TOTAL_EARNED));
@@ -278,13 +264,11 @@ public class KarmaCoinWalletServiceImpl implements KarmaCoinWalletService {
         Map<String, Object> monthlyProps = new HashMap<>();
         monthlyProps.put(Constants.KARMA_POINTS_USER_ID, userId);
         monthlyProps.put(Constants.YEAR_MONTH, currentYearMonth);
-        List<Map<String, Object>> monthlyRows = cassandraOperation.getRecordsByProperties(Constants.KEYSPACE_SUNBIRD,
-                Constants.TABLE_USER_KARMA_COIN_MONTHLY_SUMMARY, monthlyProps, new ArrayList<>());
+        List<Map<String, Object>> monthlyRows = cassandraOperation.getRecordsByPropertiesWithConsistencyLevel(Constants.KEYSPACE_SUNBIRD,
+                Constants.TABLE_USER_KARMA_COIN_MONTHLY_SUMMARY, monthlyProps, new ArrayList<>(), ConsistencyLevel.QUORUM);
         if (CollectionUtils.isNotEmpty(monthlyRows)) {
             convertedThisMonth = toInt(monthlyRows.get(0).get(Constants.POINTS_CONVERTED));
         }
-
-        cacheWalletSummary(cacheKey, totalEarned, totalRedeemed, currentYearMonth, convertedThisMonth);
         return new WalletSnapshot(totalEarned, totalRedeemed, convertedThisMonth);
     }
 
@@ -304,26 +288,11 @@ public class KarmaCoinWalletServiceImpl implements KarmaCoinWalletService {
         }
     }
 
-    private void cacheWalletSummary(String cacheKey, int totalEarned, int totalRedeemed, String yearMonth,
-            int convertedThisMonth) {
-        try {
-            Map<String, Object> cacheMap = new HashMap<>();
-            cacheMap.put(Constants.TOTAL_EARNED_CAMEL, totalEarned);
-            cacheMap.put(Constants.TOTAL_REDEEMED_CAMEL, totalRedeemed);
-            cacheMap.put(Constants.YEAR_MONTH_CAMEL, yearMonth);
-            cacheMap.put(Constants.CONVERTED_THIS_MONTH, convertedThisMonth);
-            redisCacheMgr.putStringInCache(cacheKey, objectMapper.writeValueAsString(cacheMap),
-                    serverProperties.getKarmaCoinWalletRedisTtl());
-        } catch (Exception e) {
-            logger.error("Failed to cache karma coin wallet summary for key: " + cacheKey, e);
-        }
-    }
-
     private int fetchTotalKarmaPoints(String userId) {
         Map<String, Object> props = new HashMap<>();
         props.put(Constants.KARMA_POINTS_USER_ID, userId);
-        List<Map<String, Object>> rows = cassandraOperation.getRecordsByProperties(Constants.KEYSPACE_SUNBIRD,
-                Constants.TABLE_USER_KARMA_POINTS_SUMMARY, props, new ArrayList<>());
+        List<Map<String, Object>> rows = cassandraOperation.getRecordsByPropertiesWithConsistencyLevel(Constants.KEYSPACE_SUNBIRD,
+                Constants.TABLE_USER_KARMA_POINTS_SUMMARY, props, new ArrayList<>(), ConsistencyLevel.QUORUM);
         if (CollectionUtils.isNotEmpty(rows)) {
             return toInt(rows.get(0).get(Constants.TOTAL_POINTS));
         }
@@ -374,64 +343,43 @@ public class KarmaCoinWalletServiceImpl implements KarmaCoinWalletService {
             setError(response, Constants.INVALID_REQUEST, HttpStatus.BAD_REQUEST);
             return response;
         }
-        boolean claimApplied = false;
         try {
+            String inProgressKey = buildConvertLockKey(userId);
+            boolean requestClaimed = redisCacheMgr.setIfAbsent(inProgressKey, Constants.IN_PROGRESS, serverProperties.getKarmaCoinConvertLockTtl());
+            if (!requestClaimed) {
+                setError(response, Constants.CONVERSION_REQUEST_IN_PROGRESS, HttpStatus.CONFLICT);
+                return response;
+            }
             String currentYearMonth = YearMonth.now().toString();
             WalletSnapshot snapshot = loadWalletAndMonthly(userId, currentYearMonth);
             int totalEarned = snapshot.totalEarned;
             int convertedThisMonth = snapshot.convertedThisMonth;
             int totalKarmaPoints = fetchTotalKarmaPoints(userId);
             int monthlyCap = serverProperties.getKarmaCoinMonthlyCap();
-            int unredeemedKarmaPoints = Math.max(
-                            0,
-                            totalKarmaPoints - totalEarned);
-            int remainingCap = Math.max(
-                            0,
-                            monthlyCap - convertedThisMonth);
-            int convertibleThisMonth = Math.min(
-                            remainingCap,
-                            unredeemedKarmaPoints);
+            int unredeemedKarmaPoints = Math.max(0, totalKarmaPoints - totalEarned);
+            int remainingCap = Math.max(0, monthlyCap - convertedThisMonth);
+            int convertibleThisMonth = Math.min(remainingCap, unredeemedKarmaPoints);
             if (pointsToConvert > convertibleThisMonth) {
                 setError(response, Constants.MONTHLY_CAP_EXCEEDED, HttpStatus.BAD_REQUEST);
                 return response;
             }
-
-            String lookupKey = buildLookupKey(userId, requestId);
-            Map<String, Object> lookupRow = new HashMap<>();
-            lookupRow.put(Constants.USER_KARMA_COIN_KEY, lookupKey);
-            lookupRow.put(Constants.DB_COLUMN_OPERATION_TYPE, Constants.TXN_TYPE_CREDIT);
-            lookupRow.put(Constants.DB_COLUMN_CREDIT_DATE, System.currentTimeMillis());
-            Map<String, Object> claimAddInfo = new HashMap<>();
-            claimAddInfo.put(Constants.STATUS, Constants.PROCESSING);
-            lookupRow.put(Constants.ADDINFO, objectMapper.writeValueAsString(claimAddInfo));
-
-            claimApplied = cassandraOperation.insertRecordIfNotExists(Constants.KEYSPACE_SUNBIRD, Constants.USER_KARMA_COIN_LOOKUP, lookupRow);
-            if (!claimApplied) {
-                Map<String, Object> existing = readLookupStatus(userId, requestId);
-                Map<String, Object> result = (existing != null) ? existing : new HashMap<>();
-                result.putIfAbsent(Constants.REQUEST_ID, requestId);
-                result.putIfAbsent(Constants.STATUS, Constants.PROCESSING);
-                response.setResult(result);
-                response.getParams().setStatus(Constants.OK);
-                response.setResponseCode(HttpStatus.OK);
-                return response;
-            }
-
+            String eventId = UUID.randomUUID().toString();
             Map<String, Object> data = new HashMap<>();
             data.put(Constants.EVENT_EID, Constants.KARMA_COIN_CREDIT_EID);
             data.put(Constants.EVENT_ETS, System.currentTimeMillis());
             data.put(Constants.USER_ID, userId);
             data.put(Constants.REQUEST_ID, requestId);
+            data.put(Constants.EVENT_ID, eventId);
             data.put(Constants.OPERATION, Constants.TXN_TYPE_CREDIT);
             data.put(Constants.ACTION_TYPE_CAMEL, Constants.POINTS_CONVERSION);
             data.put(Constants.POINTS_TO_CONVERT, pointsToConvert);
             data.put(Constants.CONTEXT_TYPE, Constants.POINTS_CONVERSION);
             data.put(Constants.CONTEXT_ID_CAMEL, requestId);
             data.put(Constants.CONVERSION_PERIOD, currentYearMonth);
-
             Map<String, Object> event = new HashMap<>();
             event.put(Constants.EVENT_TYPE, Constants.POINTS_CONVERSION);
             event.put(Constants.DATA, data);
+            event.put(Constants.EVENT_VERSION, serverProperties.getKarmaCoinWalletRedeemEventVersion());
             kafkaProducer.push(serverProperties.getKarmaCoinWalletRedeemTopic(), userId, event);
             Map<String, Object> result = new HashMap<>();
             result.put(Constants.REQUEST_ID, requestId);
@@ -441,9 +389,6 @@ public class KarmaCoinWalletServiceImpl implements KarmaCoinWalletService {
             response.setResponseCode(HttpStatus.ACCEPTED);
         } catch (Exception e) {
             logger.error("Failed to process karma coin redemption for user: {}", userId, e);
-            if (claimApplied) {
-                markRedeemFailed(userId, requestId, Constants.FAILED_TO_PROCESS_KARMA_COIN_REDEMPTION);
-            }
             setError(response, Constants.FAILED_TO_PROCESS_KARMA_COIN_REDEMPTION, HttpStatus.INTERNAL_SERVER_ERROR);
         }
         return response;
@@ -534,5 +479,37 @@ public class KarmaCoinWalletServiceImpl implements KarmaCoinWalletService {
             setError(response, "Failed to fetch karma coin redemption status", HttpStatus.INTERNAL_SERVER_ERROR);
         }
         return response;
+    }
+
+    /**
+     * Builds the Redis key for the per-user conversion in-progress lock from the configured
+     * pattern (default {@code karmaCoinConvertLock:{userId}}). Any {@code {token}} placeholder in
+     * the pattern is resolved from a fixed set of values that are always available wherever this
+     * key is built, so widening the key shape (e.g. to fold in context type) is a config change,
+     * not a code change.
+     */
+    private String buildConvertLockKey(String userId) {
+        Map<String, String> tokens = new HashMap<>();
+        tokens.put("userId", userId);
+        tokens.put("contextType", Constants.POINTS_CONVERSION);
+        String key = serverProperties.getKarmaCoinConvertLockKeyPattern();
+        for (Map.Entry<String, String> token : tokens.entrySet()) {
+            key = key.replace("{" + token.getKey() + "}", token.getValue());
+        }
+        return key;
+    }
+
+    /**
+     * Synthetic view for a conversion that is queued but not yet committed. Not backed by any
+     * Cassandra row — the ledger stays append-only and receives only completed transactions.
+     */
+    private Map<String, Object> buildPendingTransactionView() {
+        Map<String, Object> txn = new HashMap<>();
+        txn.put(Constants.STATUS, Constants.TXN_STATUS_IN_PROGRESS);
+        txn.put(Constants.TYPE, Constants.TXN_TYPE_CREDIT);
+        txn.put(Constants.ACTION_TYPE_CAMEL, Constants.POINTS_CONVERSION);
+        txn.put(Constants.CONTEXT_TYPE_CAMEL, Constants.POINTS_CONVERSION);
+        txn.put(Constants.DATE_CAMEL, System.currentTimeMillis());
+        return txn;
     }
 }
