@@ -33,7 +33,7 @@ public class ClaimEventKarmaPointsServiceImpl {
         envelopedMap.put(Constants.DATA, objectMap);
         envelopedMap.put(Constants.KAFKA_EVENT_VERSION_KEY, serverProperties.getKafkaEventEnvelopeVersion());
 
-        producer.pushWithKey(serverProperties.getUserEventKarmaPointTopic(), envelopedMap, userId);
+        producer.pushWithKey(serverProperties.getKarmaPointsUnifiedEventTopic(), envelopedMap, userId);
 
     }
 }

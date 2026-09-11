@@ -974,8 +974,8 @@ public class CbExtServerProperties {
 	@Value("${public.user.event.bulkonboard.table}")
 	private String publicUserEventBulkOnboardTable;
 
-	@Value("${user.event.karma.point.topic}")
-	private String userEventKarmaPointTopic;
+	@Value("${kafka.topics.karma.points.unified.event}")
+	private String karmaPointsUnifiedEventTopic;
   
   @Value("${kafka.topic.bp.report}")
 	private String kafkaTopicBPReport;
@@ -3788,12 +3788,12 @@ public class CbExtServerProperties {
 		this.publicUserEventBulkOnboardTable = publicUserEventBulkOnboardTable;
 	}
 
-	public String getUserEventKarmaPointTopic() {
-		return userEventKarmaPointTopic;
+	public String getKarmaPointsUnifiedEventTopic() {
+		return karmaPointsUnifiedEventTopic;
 	}
 
-	public void setUserEventKarmaPointTopic(String userEventKarmaPointTopic) {
-		this.userEventKarmaPointTopic = userEventKarmaPointTopic;
+	public void setKarmaPointsUnifiedEventTopic(String karmaPointsUnifiedEventTopic) {
+		this.karmaPointsUnifiedEventTopic = karmaPointsUnifiedEventTopic;
 	}
 
   	public String getKafkaTopicBPReport() {

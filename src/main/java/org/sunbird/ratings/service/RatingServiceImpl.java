@@ -61,8 +61,6 @@ public class RatingServiceImpl implements RatingService {
     @Autowired
     Producer kafkaProducer;
 
-    @Value("${kafka.topics.parent.rating.event}")
-    public String updateRatingTopicName;
 
     @Autowired
     ContentService contentService;
@@ -478,7 +476,7 @@ public class RatingServiceImpl implements RatingService {
                 envelopedRatingEvent.put(Constants.EVENT_TYPE, Constants.EVENT_TYPE_RATING);
                 envelopedRatingEvent.put(Constants.DATA, ratingMessage);
                 envelopedRatingEvent.put(Constants.KAFKA_EVENT_VERSION_KEY, serverConfig.getKafkaEventEnvelopeVersion());
-                kafkaProducer.pushWithKey(updateRatingTopicName, envelopedRatingEvent, requestRating.getUserId());
+                kafkaProducer.pushWithKey(serverConfig.getKarmaPointsUnifiedEventTopic(), envelopedRatingEvent, requestRating.getUserId());
             }
         } catch (ValidationException ex) {
             logger.error(ex);
@@ -699,7 +697,7 @@ public class RatingServiceImpl implements RatingService {
             }
         } catch (Exception e) {
             errMsg = String.format("Failed to read rating for %s Course. Exception: %s", activityId, e.getMessage());
-            logger.error("updateRatingTopicName", e);
+            logger.error("karmaPointsUnifiedEventTopic", e);
         }
         return response;
     }
@@ -793,7 +791,7 @@ public class RatingServiceImpl implements RatingService {
             response.getResult().put(Constants.TOTAL_NUMBER_ERROR_COUNT, totalNumberOfErrorContent);
             response.getParams().setStatus(Constants.SUCCESS);
         } catch (Exception e) {
-            logger.error("updateRatingTopicName", e);
+            logger.error("karmaPointsUnifiedEventTopic", e);
             response.setResponseCode(HttpStatus.INTERNAL_SERVER_ERROR);
             response.getResult().put(Constants.ERROR_MESSAGE, e.getMessage());
         }
