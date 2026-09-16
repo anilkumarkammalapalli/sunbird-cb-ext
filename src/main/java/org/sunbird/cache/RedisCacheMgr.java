@@ -87,6 +87,25 @@ public class RedisCacheMgr {
         putStringInCache(key, value, cache_ttl);
     }
 
+    /**
+     * Atomically sets {@code key} to {@code value} only if it does not already exist, expiring after
+     * {@code ttlInSeconds} (Redis {@code SET key value NX EX ttl}). Returns {@code true} when the key
+     * was newly created (the caller acquired the lock), {@code false} when the key already existed.
+     * <p>
+     * On a Redis error this fails open (returns {@code true}) so a cache outage cannot block the
+     * feature that relies on this guard; downstream de-duplication (e.g. the Kafka consumer keyed by
+     * user + event + requestId) remains the durable safety net.
+     */
+    public boolean setIfAbsent(String key, String value, int ttlInSeconds) {
+        try (Jedis jedis = jedisPool.getResource()) {
+            String result = jedis.set(Constants.REDIS_COMMON_KEY + key, value, "NX", "EX", ttlInSeconds);
+            return Constants.OK.equalsIgnoreCase(result);
+        } catch (Exception e) {
+            logger.error(e);
+            return true;
+        }
+    }
+
     public boolean deleteKeyByName(String key) {
         try (Jedis jedis = jedisPool.getResource()) {
         	jedis.del(Constants.REDIS_COMMON_KEY + key);
