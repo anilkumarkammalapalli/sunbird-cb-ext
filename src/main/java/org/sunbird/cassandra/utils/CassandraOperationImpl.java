@@ -53,6 +53,25 @@ public class CassandraOperationImpl implements CassandraOperation {
 	}
 
 	@Override
+	public boolean insertRecordIfNotExists(String keyspaceName, String tableName, Map<String, Object> request) {
+		String baseQuery = CassandraUtil.getPreparedStatement(keyspaceName, tableName, request).trim();
+		if (baseQuery.endsWith(Constants.SEMICOLON)) {
+			baseQuery = baseQuery.substring(0, baseQuery.length() - 1);
+		}
+		String query = baseQuery + Constants.IF_NOT_EXISTS;
+		PreparedStatement statement = connectionManager.getSession(keyspaceName).prepare(query);
+		BoundStatement boundStatement = new BoundStatement(statement);
+		Iterator<Object> iterator = request.values().iterator();
+		Object[] array = new Object[request.keySet().size()];
+		int i = 0;
+		while (iterator.hasNext()) {
+			array[i++] = iterator.next();
+		}
+		ResultSet resultSet = connectionManager.getSession(keyspaceName).execute(boundStatement.bind(array));
+		return resultSet.wasApplied();
+	}
+
+	@Override
 	public SBApiResponse insertBulkRecord(String keyspaceName, String tableName, List<Map<String, Object>> request) {
 		SBApiResponse response = new SBApiResponse();
 		try {
@@ -89,6 +108,23 @@ public class CassandraOperationImpl implements CassandraOperation {
 			ResultSet results = connectionManager.getSession(keyspaceName).execute(selectQuery);
 			response = CassandraUtil.createResponse(results);
 
+		} catch (Exception e) {
+			logger.error(Constants.EXCEPTION_MSG_FETCH + tableName + " : " + e.getMessage(), e);
+		}
+		return response;
+	}
+
+	@Override
+	public List<Map<String, Object>> getRecordsByPropertiesWithConsistencyLevel(String keyspaceName, String tableName,
+			Map<String, Object> propertyMap, List<String> fields, ConsistencyLevel consistencyLevel) {
+		List<Map<String, Object>> response = new ArrayList<>();
+		try {
+			Select selectQuery = processQuery(keyspaceName, tableName, propertyMap, fields);
+			if (consistencyLevel != null) {
+				selectQuery.setConsistencyLevel(consistencyLevel);
+			}
+			ResultSet results = connectionManager.getSession(keyspaceName).execute(selectQuery);
+			response = CassandraUtil.createResponse(results);
 		} catch (Exception e) {
 			logger.error(Constants.EXCEPTION_MSG_FETCH + tableName + " : " + e.getMessage(), e);
 		}
@@ -438,6 +474,28 @@ public class CassandraOperationImpl implements CassandraOperation {
 		}
 		return response;
 	}
+
+	@Override
+	public List<Map<String, Object>> getRecordsByPropertiesWithClusteringRange(String keyspaceName, String tableName,
+			Map<String, Object> propertyMap, List<String> fields, String rangeColumn, Object rangeStart,
+			Object rangeEnd) {
+		List<Map<String, Object>> response = new ArrayList<>();
+		try {
+			Select selectQuery = processQueryWithoutFiltering(keyspaceName, tableName, propertyMap, fields);
+			if (rangeStart != null) {
+				selectQuery.where(QueryBuilder.gte(rangeColumn, rangeStart));
+			}
+			if (rangeEnd != null) {
+				selectQuery.where(QueryBuilder.lte(rangeColumn, rangeEnd));
+			}
+			ResultSet results = connectionManager.getSession(keyspaceName).execute(selectQuery);
+			response = CassandraUtil.createResponse(results);
+		} catch (Exception e) {
+			logger.error(Constants.EXCEPTION_MSG_FETCH + tableName + " : " + e.getMessage(), e);
+		}
+		return response;
+	}
+
 	public Long getRecordCountWithUserId(String keyspace, String tableName, String userId,Date limitDate) {
 		try {
 			Select selectQuery = QueryBuilder.select().countAll().from(keyspace, tableName);

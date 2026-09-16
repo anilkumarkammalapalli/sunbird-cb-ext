@@ -221,6 +221,7 @@ public class Constants {
 	public static final String QUE_MARK = "?";
 	public static final String COMMA = ",";
 	public static final String CLOSING_BRACE = ");";
+	public static final String SEMICOLON = ";";
 	public static final String SUCCESS = "success";
 	public static final String UNKNOWN_IDENTIFIER = "Unknown identifier ";
 	public static final String UNDEFINED_IDENTIFIER = "Undefined column name ";
@@ -982,6 +983,55 @@ public class Constants {
 	public static final String COMPETENCY_DETAILS_MISSING = "Competency details missing for content request";
 
 	public static final String TABLE_USER_KARMA_POINTS_SUMMARY ="user_karma_points_summary";
+
+	// Karma Coin Wallet - tables
+	public static final String TABLE_USER_KARMA_COIN_WALLET = "user_karma_coin_wallet";
+	public static final String TABLE_USER_KARMA_COIN_MONTHLY_SUMMARY = "user_karma_coin_monthly_summary";
+	public static final String TOTAL_EARNED = "total_earned";
+	public static final String TOTAL_REDEEMED = "total_redeemed";
+	public static final String YEAR_MONTH = "year_month";
+	public static final String POINTS_CONVERTED = "points_converted";
+	public static final String REDIS_KEY_KARMA_COINS = "user:karmaCoins:";
+	public static final String REDIS_KEY_KARMA_REDEEM_LOCK = "user:karmaRedeemLock:";
+	public static final String API_KARMA_WALLET_SUMMARY = "api.karma.wallet.summary";
+	// Karma Coin Wallet - summary response fields
+	public static final String WALLET_BALANCE = "walletBalance";
+	public static final String TOTAL_EARNED_TILL_DATE = "totalEarnedTillDate";
+	public static final String TOTAL_KARMA_POINTS = "totalKarmaPoints";
+	public static final String UNREDEEMED_KARMA_POINTS = "unredeemedKarmaPoints";
+	public static final String YEAR_MONTH_CAMEL = "yearMonth";
+	public static final String MONTHLY_CAP = "monthlyCap";
+	public static final String CONVERTED_THIS_MONTH = "convertedThisMonth";
+	public static final String CONVERTIBLE_THIS_MONTH = "convertibleThisMonth";
+	public static final String CAP_RESETS_ON = "capResetsOn";
+	public static final String REDEEM_ENABLED = "redeemEnabled";
+	public static final String TOTAL_EARNED_CAMEL = "totalEarned";
+	public static final String TOTAL_REDEEMED_CAMEL = "totalRedeemed";
+	public static final String CONVERSION_RATE_CAMEL = "conversionRate";
+	public static final String CONVERSION_MESSAGE_CAMEL = "conversionMessage";
+
+	// Karma Coin Wallet - transactions
+	public static final String TABLE_USER_KARMA_COIN_TRANSACTIONS = "user_karma_coin_transactions";
+	public static final String DB_COLUMN_TXN_CREATED_AT = "created_at";
+	public static final String DB_COLUMN_TRANSACTION_ID = "transaction_id";
+	public static final String DB_COLUMN_AMOUNT = "amount";
+	public static final String DB_COLUMN_BALANCE_AFTER = "balance_after";
+	public static final String DB_COLUMN_ACTION_TYPE = "action_type";
+	public static final String DB_COLUMN_ADDINFO = "addinfo";
+	public static final String API_KARMA_WALLET_TRANSACTIONS = "api.karma.wallet.transactions";
+	public static final String TXN_TYPE_ALL = "ALL";
+	public static final String TXN_TYPE_CREDIT = "CREDIT";
+	public static final String TXN_TYPE_DEBIT = "DEBIT";
+	public static final String TXN_TYPE_PENDING = "PENDING";
+	public static final String TRANSACTIONS = "transactions";
+	public static final String TRANSACTION_ID_CAMEL = "transactionId";
+	public static final String DATE_CAMEL = "date";
+	public static final String AMOUNT_CAMEL = "amount";
+	public static final String BALANCE_AFTER_CAMEL = "balanceAfter";
+	public static final String ACTION_TYPE_CAMEL = "actionType";
+	public static final String ADDINFO_CAMEL = "addinfo";
+	public static final String ASIA_KOLKATA_TIMEZONE = "Asia/Kolkata";
+
     public static final String REQUEST_CONTENT_SUBJECT = "New Content Request for Capacity Building Plan Development";
 	public static final String COMPETENCY_THEMES = "competencyThemes";
 	public static final String COMPETENCY_SUB_THEMES = "competencySubThemes";
@@ -1740,4 +1790,33 @@ public class Constants {
 	public static final String TARGET_ORG_ID_KEY = "targetOrgId";
 	public static final String API_VERSION = "apiVersion";
 	public static final String USER_MIGRATE_V2 = "userMigrateV2";
+	public static final String API_KARMA_WALLET_REDEEM = "api.karma.wallet.redeem";
+	public static final String REQUEST_ID = "requestId";
+	public static final String POINTS_TO_CONVERT = "pointsToConvert";
+	public static final String POINTS_REDEMPTION = "POINTS_REDEMPTION";
+	public static final String POINTS_CONVERSION = "POINTS_CONVERSION";
+	public static final String PROCESSING = "PROCESSING";
+	public static final String ACCEPTED = "ACCEPTED";
+	public static final String MONTHLY_CAP_EXCEEDED = "MONTHLY_CAP_EXCEEDED";
+	public static final String REDEEM_REQUEST_IN_PROGRESS = "A redeem request is already in progress. Please wait a few seconds and try again.";
+	public static final String EVENT_EID = "eid";
+	public static final String EVENT_ETS = "ets";
+	public static final String EVENT_VERSION = "version";
+	public static final String OPERATION = "operation";
+	public static final String KARMA_COIN_CREDIT_EID = "KARMA_COIN_CREDIT";
+	public static final String CONVERSION_PERIOD = "conversionPeriod";
+	public static final String API_KARMA_WALLET_REDEEM_STATUS = "api.karma.wallet.redeem.status";
+	public static final String USER_KARMA_COIN_KEY = "user_karma_coin_key";
+	public static final String ADDINFO = "addinfo";
+	public static final String USER_KARMA_COIN_LOOKUP = "user_karma_coin_lookup";
+	public static final String IF_NOT_EXISTS = " IF NOT EXISTS";
+	public static final String ERROR_CODE_CAMEL = "errorCode";
+	public static final String ERROR_MESSAGE_CAMEL = "errorMessage";
+	public static final String REDEEM_REQUEST_NOT_FOUND = "Redeem request not found";
+	public static final String FAILED_TO_PROCESS_KARMA_COIN_REDEMPTION = "Failed to process karma coin redemption";
+	public static final String CONVERSION_REQUEST_IN_PROGRESS = "CONVERSION_REQUEST_IN_PROGRESS";
+	public static final String ONE = "1";
+	public static final String IN_PROGRESS = "IN_PROGRESS";
+	public static final String PIPE_SEPARATOR = "|";
+	public static final String TXN_STATUS_IN_PROGRESS = "IN_PROGRESS";
 }

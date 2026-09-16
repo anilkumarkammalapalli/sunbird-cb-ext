@@ -24,6 +24,18 @@ public interface CassandraOperation {
 	public SBApiResponse insertRecord(String keyspaceName, String tableName, Map<String, Object> request);
 
 	/**
+	 * Inserts a record only if a row with the same primary key does not already exist
+	 * (CQL {@code IF NOT EXISTS}). Used as an idempotency/claim guard.
+	 *
+	 * @param keyspaceName Keyspace name
+	 * @param tableName    Table name
+	 * @param request      Map<String,Object> (column name -> value)
+	 * @return {@code true} if the row was newly written; {@code false} if a row with the same
+	 *         primary key already existed (nothing was changed)
+	 */
+	public boolean insertRecordIfNotExists(String keyspaceName, String tableName, Map<String, Object> request);
+
+	/**
 	 * Insert bulk data using batch
 	 *
 	 * @param keyspaceName String
@@ -46,6 +58,24 @@ public interface CassandraOperation {
 	 */
 	List<Map<String, Object>> getRecordsByProperties(String keyspaceName, String tableName,
 			Map<String, Object> propertyMap, List<String> fields);
+
+	/**
+	 * Same as {@link #getRecordsByProperties(String, String, Map, List)} but executes the read at the
+	 * supplied {@link com.datastax.driver.core.ConsistencyLevel}, overriding the cluster-wide default
+	 * for this statement only. Used by strong-read paths such as the karma coin redeem validation,
+	 * where a read off a stale replica could authorise an invalid conversion. A {@code null} level
+	 * falls back to the cluster default.
+	 *
+	 * @param keyspaceName     Keyspace name
+	 * @param tableName        Table name
+	 * @param propertyMap      Map describing columns to be used in where clause of select query.
+	 * @param fields           List of columns to be returned in each record
+	 * @param consistencyLevel Consistency level to apply to this read (e.g. {@code QUORUM})
+	 * @return List consisting of fetched records
+	 */
+	List<Map<String, Object>> getRecordsByPropertiesWithConsistencyLevel(String keyspaceName, String tableName,
+			Map<String, Object> propertyMap, List<String> fields,
+			com.datastax.driver.core.ConsistencyLevel consistencyLevel);
 
 	/**
 	 * @param keyspaceName Keyspace name
@@ -141,5 +171,18 @@ public interface CassandraOperation {
 	 */
 	public Map<String, Object> updateRecordWithTTL(String keyspaceName, String tableName, Map<String, Object> updateAttributes,
 	                                               Map<String, Object> compositeKey, int ttlInSeconds);
+
+	/**
+	 * Fetches records for a single partition (defined by {@code propertyMap}) filtered by an
+	 * inclusive range on a clustering column. Rows are returned in the table's clustering order.
+	 * Used by the karma coin transactions history, which ranges over {@code created_at}.
+	 *
+	 * @param rangeColumn clustering column to range over (e.g. {@code created_at})
+	 * @param rangeStart  inclusive lower bound; skipped when {@code null}
+	 * @param rangeEnd    inclusive upper bound; skipped when {@code null}
+	 */
+	List<Map<String, Object>> getRecordsByPropertiesWithClusteringRange(String keyspaceName, String tableName,
+			Map<String, Object> propertyMap, List<String> fields, String rangeColumn, Object rangeStart,
+			Object rangeEnd);
 
 }
