@@ -71,7 +71,8 @@ public class KarmaCoinWalletServiceImpl implements KarmaCoinWalletService {
             return response;
         }
         try {
-            String currentYearMonth = YearMonth.now().toString();
+            ZoneId zoneId = ZoneId.of(Constants.ASIA_KOLKATA_TIMEZONE);
+            String currentYearMonth = YearMonth.now(zoneId).toString();
 
             WalletSnapshot snapshot = loadWalletAndMonthly(userId, currentYearMonth);
             int totalEarned = snapshot.totalEarned;
@@ -90,7 +91,7 @@ public class KarmaCoinWalletServiceImpl implements KarmaCoinWalletService {
             int unredeemedKarmaPoints = Math.max(0, totalKarmaPoints - totalEarned);
             int convertibleThisMonth = Math.max(0, Math.min(monthlyCap - convertedThisMonth, unredeemedKarmaPoints));
             boolean redeemEnabled = convertibleThisMonth > 0;
-            String capResetsOn = YearMonth.now().plusMonths(1).atDay(1).toString();
+            String capResetsOn = YearMonth.now(zoneId).plusMonths(1).atDay(1).toString();
 
             Map<String, Object> result = new HashMap<>();
             result.put(Constants.WALLET_BALANCE, walletBalance);
@@ -352,13 +353,7 @@ public class KarmaCoinWalletServiceImpl implements KarmaCoinWalletService {
             return response;
         }
         try {
-            String inProgressKey = buildConvertLockKey(userId);
-            boolean requestClaimed = redisCacheMgr.setIfAbsent(inProgressKey, String.valueOf(pointsToConvert), serverProperties.getKarmaCoinConvertLockTtl());
-            if (!requestClaimed) {
-                setError(response, Constants.CONVERSION_REQUEST_IN_PROGRESS, HttpStatus.CONFLICT);
-                return response;
-            }
-            String currentYearMonth = YearMonth.now().toString();
+            String currentYearMonth = YearMonth.now(ZoneId.of(Constants.ASIA_KOLKATA_TIMEZONE)).toString();
             WalletSnapshot snapshot = loadWalletAndMonthly(userId, currentYearMonth);
             int totalEarned = snapshot.totalEarned;
             int convertedThisMonth = snapshot.convertedThisMonth;
@@ -366,9 +361,18 @@ public class KarmaCoinWalletServiceImpl implements KarmaCoinWalletService {
             int monthlyCap = serverProperties.getKarmaCoinMonthlyCap();
             int unredeemedKarmaPoints = Math.max(0, totalKarmaPoints - totalEarned);
             int remainingCap = Math.max(0, monthlyCap - convertedThisMonth);
-            int convertibleThisMonth = Math.min(remainingCap, unredeemedKarmaPoints);
-            if (pointsToConvert > convertibleThisMonth) {
+            if (pointsToConvert > unredeemedKarmaPoints) {
+                setError(response, Constants.INSUFFICIENT_POINTS, HttpStatus.BAD_REQUEST);
+                return response;
+            }
+            if (pointsToConvert > remainingCap) {
                 setError(response, Constants.MONTHLY_CAP_EXCEEDED, HttpStatus.BAD_REQUEST);
+                return response;
+            }
+            String inProgressKey = buildConvertLockKey(userId);
+            boolean requestClaimed = redisCacheMgr.setIfAbsent(inProgressKey, String.valueOf(pointsToConvert), serverProperties.getKarmaCoinConvertLockTtl());
+            if (!requestClaimed) {
+                setError(response, Constants.CONVERSION_REQUEST_IN_PROGRESS, HttpStatus.CONFLICT);
                 return response;
             }
             String eventId = UUID.randomUUID().toString();
