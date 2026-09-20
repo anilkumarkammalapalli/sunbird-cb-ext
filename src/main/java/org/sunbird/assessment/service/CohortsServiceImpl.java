@@ -26,6 +26,7 @@ import org.sunbird.cassandra.utils.CassandraOperation;
 import org.sunbird.common.model.*;
 import org.sunbird.common.service.ContentService;
 import org.sunbird.common.service.OutboundRequestHandlerServiceImpl;
+import org.sunbird.common.util.AccessTokenValidator;
 import org.sunbird.common.util.CbExtServerProperties;
 import org.sunbird.common.util.Constants;
 import org.sunbird.common.util.IndexerService;
@@ -62,6 +63,9 @@ public class CohortsServiceImpl implements CohortsService {
 
 	@Autowired
 	IndexerService indexerService;
+
+	@Autowired
+	AccessTokenValidator accessTokenValidator;
 
 	@Override
 	public List<CohortUsers> getTopPerformers(String rootOrg, String contentId, String userId, int count) {
@@ -184,6 +188,23 @@ public class CohortsServiceImpl implements CohortsService {
 				cbExtServerProperties.getCourseServiceHost() + cbExtServerProperties.getUserCourseEnroll(), req,
 				headers);
 		return enrollMentResponse;
+	}
+
+	// Calls sunbird-course-service to check whether the user has completed all mandatory
+	// prerequisite courses for this Comprehensive Assessment do_id. Fails closed (returns
+	// false) on any network/parse error, same as any other new capability with no prior
+	// working baseline - this only gates the newly-accepted "Comprehensive Assessment"
+	// category, never the pre-existing Course/Standalone Assessment auto-enroll flow.
+	private boolean isMandatoryCourseCompletionValidated(String contentId, Map<String, String> headers) {
+		try {
+			String uri = cbExtServerProperties.getCourseServiceHost()
+					+ cbExtServerProperties.getMandatoryCourseCompletionCheck() + contentId;
+			Map<String, Object> response = outboundRequestHandlerService.fetchResultUsingGet(uri, headers);
+			return !MapUtils.isEmpty(response) && Constants.OK.equals(response.get(Constants.RESPONSE_CODE));
+		} catch (Exception e) {
+			logger.error("Failed to validate mandatory course completion for contentId: " + contentId, e);
+			return false;
+		}
 	}
 
 	private void processChildContentId(String givenContentId, List<String> assessmentIdList) {
@@ -314,6 +335,40 @@ public class CohortsServiceImpl implements CohortsService {
 			logger.error(e);
 		}
 		return activeUserCollection;
+	}
+
+	// Dedicated entry point for Comprehensive Assessment auto-enrollment: validates the
+	// content is actually tagged with the configured Comprehensive Assessment category and
+	// that the user has completed its mandatory prerequisite courses, THEN delegates to the
+	// existing autoEnrollmentInCourseV2 for batch resolution, active-enrollment check, and
+	// the actual enroll call. autoEnrollmentInCourseV2 itself is unmodified by this check -
+	// its own callers (e.g. the generic /v1/autoenrollment endpoint) never hit this gate.
+	@Override
+	public SBApiResponse autoEnrollmentInComprehensiveAssessment(String authUserToken, String rootOrgId, String rootOrg, String contentId, String language) throws Exception {
+		SBApiResponse finalResponse = ProjectUtil.createDefaultResponse(Constants.API_USER_ENROLMENT);
+		String userUUID = accessTokenValidator.fetchUserIdFromAccessToken(authUserToken, finalResponse);
+		if (StringUtils.isEmpty(userUUID)) {
+			return finalResponse;
+		}
+		Map<String, Object> contentResponse = contentService.readContent(contentId);
+		if (ObjectUtils.isEmpty(contentResponse)) {
+			ProjectUtil.updateErrorDetails(finalResponse, String.format(Constants.CONTENT_NOT_AVAILABLE, contentId), HttpStatus.BAD_REQUEST);
+			return finalResponse;
+		}
+		String courseCategory = (String) contentResponse.get(Constants.COURSE_CATEGORY);
+		if (!cbExtServerProperties.getComprehensiveAssessmentCategory().equalsIgnoreCase(courseCategory)) {
+			ProjectUtil.updateErrorDetails(finalResponse, String.format(Constants.AUTO_ENROLL_PRIMARY_CATEGORY_ERROR_MSG, courseCategory), HttpStatus.BAD_REQUEST);
+			return finalResponse;
+		}
+		Map<String, String> headers = new HashMap<>();
+		headers.put(Constants.X_AUTH_TOKEN, authUserToken);
+		headers.put(Constants.AUTHORIZATION, cbExtServerProperties.getSbApiKey());
+		headers.put(Constants.X_AUTH_USER_ORG_ID, rootOrgId);
+		if (!isMandatoryCourseCompletionValidated(contentId, headers)) {
+			ProjectUtil.updateErrorDetails(finalResponse, Constants.MANDATORY_COURSE_NOT_COMPLETED_ERROR_MSG, HttpStatus.BAD_REQUEST);
+			return finalResponse;
+		}
+		return autoEnrollmentInCourseV2(authUserToken, rootOrgId, rootOrg, contentId, userUUID, language);
 	}
 
 	@Override

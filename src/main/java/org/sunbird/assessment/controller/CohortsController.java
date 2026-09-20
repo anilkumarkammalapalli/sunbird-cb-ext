@@ -89,6 +89,30 @@ public class CohortsController {
 		return new ResponseEntity<>(response, response.getResponseCode());
 	}
 
+	/**
+	 * Dedicated Comprehensive Assessment auto-enrollment entry point - validates CA
+	 * eligibility/mandatory-course completion before delegating to the standard enroll flow.
+	 * userId is derived server-side from authUserToken, never taken from caller input.
+	 *
+	 * @param authUserToken
+	 * @param contentId
+	 * @param rootOrg
+	 * @return
+	 * @throws Exception
+	 */
+	@GetMapping("/v1/comprehensiveassessment/autoenrollment/{courseId}")
+	public ResponseEntity<SBApiResponse> autoEnrollmentInComprehensiveAssessment(@RequestHeader("Authorization") String authUserToken,
+																	@RequestHeader(name = Constants.X_AUTH_USER_ORG_ID, required = false) String rootOrgId,
+																	@PathVariable("courseId") String contentId,
+																	@RequestHeader("rootOrg") String rootOrg,
+																	@RequestParam(name = Constants.LANGUAGE,required = false) String language) throws Exception {
+		if (authUserToken.contains(" ")) {
+			authUserToken = authUserToken.split(" ")[1];
+		}
+		SBApiResponse response = cohortsServ.autoEnrollmentInComprehensiveAssessment(authUserToken, rootOrgId, rootOrg, contentId, language);
+		return new ResponseEntity<>(response, response.getResponseCode());
+	}
+
 
 //	====================================
 //	KONG API ROUTES CHANGES
