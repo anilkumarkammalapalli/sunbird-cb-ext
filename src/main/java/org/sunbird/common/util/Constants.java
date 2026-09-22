@@ -1801,6 +1801,8 @@ public class Constants {
 	public static final String PROCESSING = "PROCESSING";
 	public static final String ACCEPTED = "ACCEPTED";
 	public static final String MONTHLY_CAP_EXCEEDED = "MONTHLY_CAP_EXCEEDED";
+	public static final String INSUFFICIENT_KARMA_POINTS = "INSUFFICIENT_KARMA_POINTS";
+	public static final String TRANSACTION_DATE_RANGE_EXCEEDED = "You can view history for up to the last 1 year only.";
 	public static final String REDEEM_REQUEST_IN_PROGRESS = "A redeem request is already in progress. Please wait a few seconds and try again.";
 	public static final String EVENT_EID = "eid";
 	public static final String EVENT_ETS = "ets";
