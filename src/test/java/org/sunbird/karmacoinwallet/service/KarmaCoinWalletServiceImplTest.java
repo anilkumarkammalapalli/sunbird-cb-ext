@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -292,6 +293,29 @@ public class KarmaCoinWalletServiceImplTest {
     }
 
     @Test
+    public void getTransactions_rangeBeyondOneYear_returnsBadRequest() {
+        mockAuthenticatedAndAuthorized();
+
+        SBApiResponse response = service.getTransactions(TOKEN,
+                transactionRequest("2025-01-01", "2026-01-02", null));
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getResponseCode());
+        assertEquals(Constants.TRANSACTION_DATE_RANGE_EXCEEDED, response.getParams().getErrmsg());
+    }
+
+    @Test
+    public void getTransactions_rangeOfExactlyOneYear_isAllowed() {
+        mockAuthenticatedAndAuthorized();
+        when(cassandraOperation.getRecordsByPropertiesWithClusteringRange(anyString(), anyString(), anyMap(),
+                anyList(), anyString(), anyLong(), anyLong())).thenReturn(Collections.emptyList());
+
+        SBApiResponse response = service.getTransactions(TOKEN,
+                transactionRequest("2025-01-01", "2026-01-01", null));
+
+        assertEquals(HttpStatus.OK, response.getResponseCode());
+    }
+
+    @Test
     public void getTransactions_unparseableDate_returnsBadRequest() {
         mockAuthenticatedAndAuthorized();
 
@@ -499,7 +523,9 @@ public class KarmaCoinWalletServiceImplTest {
     @Test
     public void redeem_duplicateInProgress_returnsConflict() {
         mockAuthenticatedAndAuthorized();
-        // dedup guard denies the claim => another redeem for this user is already in flight
+        // request passes validation (enough points, within cap) but the dedup guard denies the claim
+        // => another redeem for this user is already in flight
+        mockCassandraWallet(10, 0, 0, 100);
         mockDedupGuard(false);
 
         SBApiResponse response = service.redeem(TOKEN, redeemRequest(10, "req-1"));
@@ -507,22 +533,47 @@ public class KarmaCoinWalletServiceImplTest {
         assertEquals(HttpStatus.CONFLICT, response.getResponseCode());
         assertEquals(Constants.CONVERSION_REQUEST_IN_PROGRESS, response.getParams().getErrmsg());
         verify(kafkaProducer, never()).push(anyString(), anyString(), any());
-        // the guard is per-user, not per-request: no wallet/points reads should happen once denied
-        verify(cassandraOperation, never()).getRecordsByPropertiesWithConsistencyLevel(anyString(), anyString(),
-                anyMap(), anyList(), any(ConsistencyLevel.class));
     }
 
     @Test
     public void redeem_exceedsConvertibleCap_returnsBadRequest() {
         mockAuthenticatedAndAuthorized();
         mockDedupGuard(true);
-        // convertible = min(cap-converted=80, unredeemed=60) = 60; asking for 61
-        mockCassandraWallet(40, 10, 20, 100);
+        // unredeemed = 100-10 = 90; remainingCap = cap(100)-converted(90) = 10; convertible = min(10,90) = 10; asking for 11
+        mockCassandraWallet(10, 0, 90, 100);
 
-        SBApiResponse response = service.redeem(TOKEN, redeemRequest(61, "req-1"));
+        SBApiResponse response = service.redeem(TOKEN, redeemRequest(11, "req-1"));
 
         assertEquals(HttpStatus.BAD_REQUEST, response.getResponseCode());
         assertEquals(Constants.MONTHLY_CAP_EXCEEDED, response.getParams().getErrmsg());
+        verify(kafkaProducer, never()).push(anyString(), anyString(), any());
+    }
+
+    @Test
+    public void redeem_insufficientPoints_partialBalance_returnsBadRequest() {
+        mockAuthenticatedAndAuthorized();
+        mockDedupGuard(true);
+        // unredeemed = 100-90 = 10; user asks for 15, more than they have, even though monthly cap is not reached
+        mockCassandraWallet(90, 0, 0, 100);
+
+        SBApiResponse response = service.redeem(TOKEN, redeemRequest(15, "req-1"));
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getResponseCode());
+        assertEquals(Constants.INSUFFICIENT_KARMA_POINTS, response.getParams().getErrmsg());
+        verify(kafkaProducer, never()).push(anyString(), anyString(), any());
+    }
+
+    @Test
+    public void redeem_insufficientPoints_zeroBalance_returnsBadRequest() {
+        mockAuthenticatedAndAuthorized();
+        mockDedupGuard(true);
+        // unredeemed = 100-100 = 0; user has no points left to convert
+        mockCassandraWallet(100, 0, 0, 100);
+
+        SBApiResponse response = service.redeem(TOKEN, redeemRequest(10, "req-1"));
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getResponseCode());
+        assertEquals(Constants.INSUFFICIENT_KARMA_POINTS, response.getParams().getErrmsg());
         verify(kafkaProducer, never()).push(anyString(), anyString(), any());
     }
 
