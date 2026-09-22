@@ -22,13 +22,11 @@ import org.sunbird.common.model.SBApiResponse;
 import org.sunbird.common.model.SearchUserApiContent;
 import org.sunbird.common.util.AccessTokenValidator;
 import org.sunbird.common.util.Constants;
-import org.sunbird.common.util.ProjectUtil;
 import org.sunbird.core.producer.Producer;
 import org.sunbird.programcoordinator.dto.ProgramCoordinatorUpsertRequest;
 import org.sunbird.programcoordinator.entity.ProgramCoordinatorEntity;
 import org.sunbird.programcoordinator.entity.ProgramCoordinatorRoleEntity;
 import org.sunbird.programcoordinator.repository.ProgramCoordinatorListDto;
-import org.sunbird.programcoordinator.repository.ProgramCoordinatorListItem;
 import org.sunbird.programcoordinator.repository.ProgramCoordinatorRepository;
 import org.sunbird.programcoordinator.repository.ProgramCoordinatorRoleRepository;
 import org.sunbird.user.service.UserUtilityService;
@@ -55,6 +53,8 @@ public class ProgramCoordinatorServiceImpl implements ProgramCoordinatorService 
     private String coordinatorSyncTopic;
 
     private Map<Short, String> roleMap;
+
+    private Map<String, Short> roleNameToIdMap;
 
     @Value("#{'${program.coordinator.admin.allowed.roles}'.split(',')}")
     private List<String> adminAllowedRoles;
@@ -85,11 +85,17 @@ public class ProgramCoordinatorServiceImpl implements ProgramCoordinatorService 
 
     @PostConstruct
     public void loadRoles() {
-        roleMap = programCoordinatorRoleRepository.findAll()
-                .stream()
+        List<ProgramCoordinatorRoleEntity> roles = programCoordinatorRoleRepository.findAll();
+
+        roleMap = roles.stream()
                 .collect(Collectors.toMap(
                         ProgramCoordinatorRoleEntity::getId,
                         ProgramCoordinatorRoleEntity::getRoleName));
+
+        roleNameToIdMap = roles.stream()
+                .collect(Collectors.toMap(
+                        role -> role.getRoleName().trim().toLowerCase(Locale.ROOT),
+                        ProgramCoordinatorRoleEntity::getId));
 
         defaultProgramCoordinatorRoleId = roleMap.entrySet()
                 .stream()
@@ -408,20 +414,9 @@ public class ProgramCoordinatorServiceImpl implements ProgramCoordinatorService 
                 return false;
             }
 
-            if (request.getStatus().equals(Constants.ACTIVE_STATUS_PC)) {
-
-                if (request.getRoleId() == null) {
-                    response.getParams().setErrmsg(Constants.ROLE_ID_REQUIRED);
-                    response.setResponseCode(HttpStatus.BAD_REQUEST);
-                    return false;
-                }
-
-                if (!programCoordinatorRoleRepository.existsById(request.getRoleId())) {
-                    response.getParams().setErrmsg(
-                            Constants.INVALID_ROLE_ID + request.getRoleId());
-                    response.setResponseCode(HttpStatus.BAD_REQUEST);
-                    return false;
-                }
+            if (request.getStatus().equals(Constants.ACTIVE_STATUS_PC)
+                    && !resolveRole(request, true, response)) {
+                return false;
             }
 
             if (!userIds.add(request.getUserId())) {
@@ -432,6 +427,43 @@ public class ProgramCoordinatorServiceImpl implements ProgramCoordinatorService 
             }
         }
 
+        return true;
+    }
+
+    /**
+     * Resolves roleName to roleId (case-insensitive, trimmed) when roleId isn't supplied
+     * directly, mutating the request so the rest of the upsert flow can keep reading
+     * getRoleId() unchanged. roleId wins when both are supplied.
+     */
+    private boolean resolveRole(ProgramCoordinatorUpsertRequest request, boolean roleRequired,
+                                SBApiResponse response) {
+
+        if (request.getRoleId() != null) {
+            if (!programCoordinatorRoleRepository.existsById(request.getRoleId())) {
+                response.getParams().setErrmsg(Constants.INVALID_ROLE_ID + request.getRoleId());
+                response.setResponseCode(HttpStatus.BAD_REQUEST);
+                return false;
+            }
+            return true;
+        }
+
+        if (StringUtils.isBlank(request.getRoleName())) {
+            if (roleRequired) {
+                response.getParams().setErrmsg(Constants.ROLE_REQUIRED);
+                response.setResponseCode(HttpStatus.BAD_REQUEST);
+                return false;
+            }
+            return true;
+        }
+
+        Short roleId = roleNameToIdMap.get(request.getRoleName().trim().toLowerCase(Locale.ROOT));
+        if (roleId == null) {
+            response.getParams().setErrmsg(Constants.INVALID_ROLE_NAME + request.getRoleName());
+            response.setResponseCode(HttpStatus.BAD_REQUEST);
+            return false;
+        }
+
+        request.setRoleId(roleId);
         return true;
     }
 
@@ -563,12 +595,7 @@ public class ProgramCoordinatorServiceImpl implements ProgramCoordinatorService 
                 return false;
             }
 
-            if (request.getRoleId() != null
-                    && !programCoordinatorRoleRepository.existsById(request.getRoleId())) {
-
-                response.getParams().setErrmsg(
-                        Constants.INVALID_ROLE_ID + request.getRoleId());
-                response.setResponseCode(HttpStatus.BAD_REQUEST);
+            if (!resolveRole(request, false, response)) {
                 return false;
             }
 
