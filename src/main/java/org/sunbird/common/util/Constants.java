@@ -1761,6 +1761,8 @@ public class Constants {
 	public static final String USER_ID_REQUIRED = "User Id is required.";
 	public static final String ROLE_ID_REQUIRED = "Role Id is required.";
 	public static final String INVALID_ROLE_ID = "Invalid role id : ";
+	public static final String ROLE_REQUIRED = "Role Id or Role Name is required.";
+	public static final String INVALID_ROLE_NAME = "Invalid role name : ";
 	public static final String DUPLICATE_COORDINATOR = "Duplicate coordinator : ";
 	public static final String INTERNAL_SERVER_ERROR = "Internal server error.";
 	public static final String ADDED_OR_UPDATED = "added_or_updated";
