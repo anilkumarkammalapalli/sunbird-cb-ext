@@ -309,8 +309,9 @@ public class KarmaCoinWalletServiceImplTest {
         when(cassandraOperation.getRecordsByPropertiesWithClusteringRange(anyString(), anyString(), anyMap(),
                 anyList(), anyString(), anyLong(), anyLong())).thenReturn(Collections.emptyList());
 
-        SBApiResponse response = service.getTransactions(TOKEN,
-                transactionRequest("2025-01-01", "2026-01-01", null));
+        SBApiResponse response = service.getTransactions(
+                TOKEN,
+                transactionRequest("2025-09-23", "2026-09-23", null));
 
         assertEquals(HttpStatus.OK, response.getResponseCode());
     }

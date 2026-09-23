@@ -150,17 +150,19 @@ public class KarmaCoinWalletServiceImpl implements KarmaCoinWalletService {
         long startDate;
         long endDate;
         try {
+            ZoneId zoneId = ZoneId.of(Constants.ASIA_KOLKATA_TIMEZONE);
             LocalDate fromDate = LocalDate.parse(String.valueOf(request.get(Constants.START_DATE)));
             LocalDate toDate = LocalDate.parse(String.valueOf(request.get(Constants.END_DATE)));
+            LocalDate today = LocalDate.now(zoneId);
+            LocalDate minimumDate = today.minusYears(1);
             if (toDate.isBefore(fromDate)) {
                 setError(response, Constants.INVALID_REQUEST, HttpStatus.BAD_REQUEST);
                 return response;
             }
-            if (toDate.isAfter(fromDate.plusYears(1))) {
+            if (fromDate.isBefore(minimumDate) || toDate.isAfter(today)) {
                 setError(response, Constants.TRANSACTION_DATE_RANGE_EXCEEDED, HttpStatus.BAD_REQUEST);
                 return response;
             }
-            ZoneId zoneId = ZoneId.of(Constants.ASIA_KOLKATA_TIMEZONE);
             startDate = fromDate.atStartOfDay(zoneId).toInstant().toEpochMilli();
             endDate = toDate.plusDays(1).atStartOfDay(zoneId).toInstant().toEpochMilli() - 1;
         } catch (Exception e) {
