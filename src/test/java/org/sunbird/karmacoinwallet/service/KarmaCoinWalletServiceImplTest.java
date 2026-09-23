@@ -13,7 +13,9 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.time.LocalDate;
 import java.time.YearMonth;
+import java.time.ZoneId;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -307,12 +309,22 @@ public class KarmaCoinWalletServiceImplTest {
     @Test
     public void getTransactions_rangeOfExactlyOneYear_isAllowed() {
         mockAuthenticatedAndAuthorized();
-        when(cassandraOperation.getRecordsByPropertiesWithClusteringRange(anyString(), anyString(), anyMap(),
-                anyList(), anyString(), anyLong(), anyLong())).thenReturn(Collections.emptyList());
+
+        when(cassandraOperation.getRecordsByPropertiesWithClusteringRange(
+                anyString(), anyString(), anyMap(),
+                anyList(), anyString(), anyLong(), anyLong()))
+                .thenReturn(Collections.emptyList());
+
+        ZoneId zoneId = ZoneId.of(Constants.ASIA_KOLKATA_TIMEZONE);
+        LocalDate today = LocalDate.now(zoneId);
+        LocalDate oneYearAgo = today.minusYears(1);
 
         SBApiResponse response = service.getTransactions(
                 TOKEN,
-                transactionRequest("2025-09-23", "2026-09-23", null));
+                transactionRequest(
+                        oneYearAgo.toString(),
+                        today.toString(),
+                        null));
 
         assertEquals(HttpStatus.OK, response.getResponseCode());
     }
@@ -509,19 +521,32 @@ public class KarmaCoinWalletServiceImplTest {
     @SuppressWarnings("unchecked")
     public void getTransactions_pendingEnrolmentTerminalStatus_notShownAsInProgress() {
         mockAuthenticatedAndAuthorized();
-        when(cassandraOperation.getRecordsByPropertiesWithClusteringRange(anyString(), anyString(), anyMap(),
-                anyList(), anyString(), any(), any()))
-                .thenReturn(Collections.emptyList());
-        when(redisCacheMgr.getValuesByPattern("karmaCoinConvertLock:" + USER_ID + ":*")).thenReturn(Collections.emptyMap());
-        // once redemption completes, karma-points-processor-v2 overwrites the value with a bare
-        // status string ("SUCCESS"/"FAILED") instead of JSON - that's terminal, not pending
-        when(redisCacheMgr.getValuesByRawPattern("pendingEnrolment_" + USER_ID + "_*"))
-                .thenReturn(Collections.singletonMap("pendingEnrolment_" + USER_ID + "_ext_123", "SUCCESS"));
 
-        SBApiResponse response = service.getTransactions(TOKEN, transactionRequest("2026-01-01", "2026-01-31", "ALL"));
+        when(cassandraOperation.getRecordsByPropertiesWithClusteringRange(
+                anyString(), anyString(), anyMap(), anyList(), anyString(), any(), any()))
+                .thenReturn(Collections.emptyList());
+
+        when(redisCacheMgr.getValuesByPattern(
+                "karmaCoinConvertLock:" + USER_ID + ":*"))
+                .thenReturn(Collections.emptyMap());
+
+        when(redisCacheMgr.getValuesByRawPattern(
+                "pendingEnrolment_" + USER_ID + "_*"))
+                .thenReturn(Collections.singletonMap(
+                        "pendingEnrolment_" + USER_ID + "_ext_123",
+                        "SUCCESS"));
+
+        SBApiResponse response =
+                service.getTransactions(
+                        TOKEN,
+                        transactionRequest("2026-01-01", "2026-01-31", "ALL"));
 
         assertEquals(HttpStatus.OK, response.getResponseCode());
-        List<Map<String, Object>> txns = (List<Map<String, Object>>) response.getResult().get(Constants.TRANSACTIONS);
+
+        List<Map<String, Object>> txns =
+                (List<Map<String, Object>>) response.getResult()
+                        .get(Constants.TRANSACTIONS);
+
         assertEquals(0, txns.size());
     }
 
