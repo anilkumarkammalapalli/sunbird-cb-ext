@@ -798,6 +798,8 @@ public class Constants {
 
 	public static final String COURSE_NAME = "courseName";
 
+	public static final String KARMA_COINS_CAMEL = "karmaCoins";
+
 	public static final String ATTENDANCE_MARKED = "ATTENDANCE MARKED";
 
 	public static final Object KARMYOGI_BHARAT = "Karmyogi Bharat";
@@ -1798,6 +1800,7 @@ public class Constants {
 	public static final String POINTS_TO_CONVERT = "pointsToConvert";
 	public static final String POINTS_REDEMPTION = "POINTS_REDEMPTION";
 	public static final String POINTS_CONVERSION = "POINTS_CONVERSION";
+	public static final String PENDING_ENROLMENT_KEY_PREFIX = "pendingEnrolment";
 	public static final String PROCESSING = "PROCESSING";
 	public static final String ACCEPTED = "ACCEPTED";
 	public static final String MONTHLY_CAP_EXCEEDED = "MONTHLY_CAP_EXCEEDED";

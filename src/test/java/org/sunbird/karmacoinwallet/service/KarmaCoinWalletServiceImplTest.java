@@ -65,7 +65,7 @@ public class KarmaCoinWalletServiceImplTest {
     @BeforeEach
     public void setUp() {
         MockitoAnnotations.initMocks(this);
-        when(serverProperties.getKarmaCoinConvertLockKeyPattern()).thenReturn("karmaCoinConvertLock:{userId}");
+        when(serverProperties.getKarmaCoinConvertLockKeyPattern()).thenReturn("karmaCoinConvertLock:{userId}:{requestId}");
     }
 
     private void mockAuthenticatedAndAuthorized() {
@@ -127,13 +127,14 @@ public class KarmaCoinWalletServiceImplTest {
     }
 
     /**
-     * Stubs the conversion in-progress lock (Redis {@code SET NX EX}, keyed by userId only) to
-     * either grant or deny the claim. The lock value is the points being converted (so
+     * Stubs the conversion in-progress lock (Redis {@code SET NX EX}, keyed by userId + requestId)
+     * to either grant or deny the claim. The lock value is the points being converted (so
      * {@code getTransactions} can later read it back), not a fixed marker, hence {@code anyString()}.
+     * Assumes the caller uses requestId {@code "req-1"}, matching every test that calls this helper.
      */
     private void mockDedupGuard(boolean claimed) {
         when(serverProperties.getKarmaCoinConvertLockTtl()).thenReturn(DEDUP_TTL);
-        when(redisCacheMgr.setIfAbsent(eq("karmaCoinConvertLock:" + USER_ID),
+        when(redisCacheMgr.setIfAbsent(eq("karmaCoinConvertLock:" + USER_ID + ":req-1"),
                 anyString(), eq(DEDUP_TTL))).thenReturn(claimed);
     }
 
@@ -397,7 +398,8 @@ public class KarmaCoinWalletServiceImplTest {
         when(cassandraOperation.getRecordsByPropertiesWithClusteringRange(anyString(), anyString(), anyMap(),
                 anyList(), anyString(), any(), any()))
                 .thenReturn(Collections.singletonList(row(Constants.TXN_TYPE_CREDIT)));
-        when(redisCacheMgr.getCache("karmaCoinConvertLock:" + USER_ID)).thenReturn("50");
+        when(redisCacheMgr.getValuesByPattern("karmaCoinConvertLock:" + USER_ID + ":*"))
+                .thenReturn(Collections.singletonMap("karmaCoinConvertLock:" + USER_ID + ":req-1", "50"));
         when(serverProperties.getKarmaCoinConversionRate()).thenReturn(2);
 
         SBApiResponse response = service.getTransactions(TOKEN, transactionRequest("2026-01-01", "2026-01-31", "ALL"));
@@ -419,12 +421,39 @@ public class KarmaCoinWalletServiceImplTest {
 
     @Test
     @SuppressWarnings("unchecked")
+    public void getTransactions_multiplePendingLocks_prependsOneItemPerLock() {
+        mockAuthenticatedAndAuthorized();
+        when(cassandraOperation.getRecordsByPropertiesWithClusteringRange(anyString(), anyString(), anyMap(),
+                anyList(), anyString(), any(), any()))
+                .thenReturn(Collections.singletonList(row(Constants.TXN_TYPE_CREDIT)));
+        // two tabs converting concurrently => two distinct requestId-scoped locks for the same user
+        Map<String, String> pendingLocks = new HashMap<>();
+        pendingLocks.put("karmaCoinConvertLock:" + USER_ID + ":req-1", "50");
+        pendingLocks.put("karmaCoinConvertLock:" + USER_ID + ":req-2", "30");
+        when(redisCacheMgr.getValuesByPattern("karmaCoinConvertLock:" + USER_ID + ":*")).thenReturn(pendingLocks);
+        when(serverProperties.getKarmaCoinConversionRate()).thenReturn(1);
+
+        SBApiResponse response = service.getTransactions(TOKEN, transactionRequest("2026-01-01", "2026-01-31", "ALL"));
+
+        assertEquals(HttpStatus.OK, response.getResponseCode());
+        List<Map<String, Object>> txns = (List<Map<String, Object>>) response.getResult().get(Constants.TRANSACTIONS);
+        assertEquals(3, txns.size());
+        List<Object> pendingAmounts = Arrays.asList(txns.get(0).get(Constants.POINTS_TO_CONVERT),
+                txns.get(1).get(Constants.POINTS_TO_CONVERT));
+        assertEquals(2, new java.util.HashSet<>(pendingAmounts).size());
+        assertEquals(true, pendingAmounts.contains(50) && pendingAmounts.contains(30));
+        assertEquals("txn-CREDIT", txns.get(2).get(Constants.TRANSACTION_ID_CAMEL));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
     public void getTransactions_noPendingLock_noInProgressItem() {
         mockAuthenticatedAndAuthorized();
         when(cassandraOperation.getRecordsByPropertiesWithClusteringRange(anyString(), anyString(), anyMap(),
                 anyList(), anyString(), any(), any()))
                 .thenReturn(Collections.singletonList(row(Constants.TXN_TYPE_CREDIT)));
-        when(redisCacheMgr.getCache("karmaCoinConvertLock:" + USER_ID)).thenReturn(null);
+        when(redisCacheMgr.getValuesByPattern("karmaCoinConvertLock:" + USER_ID + ":*"))
+                .thenReturn(Collections.emptyMap());
 
         SBApiResponse response = service.getTransactions(TOKEN, transactionRequest("2026-01-01", "2026-01-31", "ALL"));
 
@@ -441,7 +470,53 @@ public class KarmaCoinWalletServiceImplTest {
                 anyList(), anyString(), any(), any()))
                 .thenReturn(Collections.emptyList());
         // stale/corrupt lock value (e.g. legacy "IN_PROGRESS" marker) should not blow up the endpoint
-        when(redisCacheMgr.getCache("karmaCoinConvertLock:" + USER_ID)).thenReturn(Constants.IN_PROGRESS);
+        when(redisCacheMgr.getValuesByPattern("karmaCoinConvertLock:" + USER_ID + ":*"))
+                .thenReturn(Collections.singletonMap("karmaCoinConvertLock:" + USER_ID + ":req-1", Constants.IN_PROGRESS));
+
+        SBApiResponse response = service.getTransactions(TOKEN, transactionRequest("2026-01-01", "2026-01-31", "ALL"));
+
+        assertEquals(HttpStatus.OK, response.getResponseCode());
+        List<Map<String, Object>> txns = (List<Map<String, Object>>) response.getResult().get(Constants.TRANSACTIONS);
+        assertEquals(0, txns.size());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void getTransactions_pendingEnrolmentInRedis_prependsInProgressDebitItem() {
+        mockAuthenticatedAndAuthorized();
+        when(cassandraOperation.getRecordsByPropertiesWithClusteringRange(anyString(), anyString(), anyMap(),
+                anyList(), anyString(), any(), any()))
+                .thenReturn(Collections.singletonList(row(Constants.TXN_TYPE_CREDIT)));
+        when(redisCacheMgr.getValuesByPattern("karmaCoinConvertLock:" + USER_ID + ":*")).thenReturn(Collections.emptyMap());
+        when(redisCacheMgr.getValuesByRawPattern("pendingEnrolment_" + USER_ID + "_*")).thenReturn(
+                Collections.singletonMap("pendingEnrolment_" + USER_ID + "_ext_123",
+                        "{\"courseName\":\"AI-Powered Retail Operations\",\"karmaCoins\":100,\"status\":\"Pending\"}"));
+
+        SBApiResponse response = service.getTransactions(TOKEN, transactionRequest("2026-01-01", "2026-01-31", "ALL"));
+
+        assertEquals(HttpStatus.OK, response.getResponseCode());
+        List<Map<String, Object>> txns = (List<Map<String, Object>>) response.getResult().get(Constants.TRANSACTIONS);
+        assertEquals(2, txns.size());
+        Map<String, Object> pending = txns.get(0);
+        assertEquals(Constants.TXN_STATUS_IN_PROGRESS, pending.get(Constants.STATUS));
+        assertEquals(Constants.TXN_TYPE_DEBIT, pending.get(Constants.TYPE));
+        assertEquals(Constants.POINTS_REDEMPTION, pending.get(Constants.ACTION_TYPE_CAMEL));
+        assertEquals("AI-Powered Retail Operations", pending.get(Constants.COURSE_NAME));
+        assertEquals(100, pending.get(Constants.AMOUNT_CAMEL));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void getTransactions_pendingEnrolmentTerminalStatus_notShownAsInProgress() {
+        mockAuthenticatedAndAuthorized();
+        when(cassandraOperation.getRecordsByPropertiesWithClusteringRange(anyString(), anyString(), anyMap(),
+                anyList(), anyString(), any(), any()))
+                .thenReturn(Collections.emptyList());
+        when(redisCacheMgr.getValuesByPattern("karmaCoinConvertLock:" + USER_ID + ":*")).thenReturn(Collections.emptyMap());
+        // once redemption completes, karma-points-processor-v2 overwrites the value with a bare
+        // status string ("SUCCESS"/"FAILED") instead of JSON - that's terminal, not pending
+        when(redisCacheMgr.getValuesByRawPattern("pendingEnrolment_" + USER_ID + "_*"))
+                .thenReturn(Collections.singletonMap("pendingEnrolment_" + USER_ID + "_ext_123", "SUCCESS"));
 
         SBApiResponse response = service.getTransactions(TOKEN, transactionRequest("2026-01-01", "2026-01-31", "ALL"));
 
@@ -551,6 +626,23 @@ public class KarmaCoinWalletServiceImplTest {
     }
 
     @Test
+    public void redeem_otherPendingRequestCountedAgainstBalance_returnsInsufficientPoints() {
+        mockAuthenticatedAndAuthorized();
+        // another tab already has 60 points locked in-flight (its own requestId, not yet committed)
+        mockCassandraWallet(0, 0, 0, 100);
+        when(redisCacheMgr.getValuesByPattern("karmaCoinConvertLock:" + USER_ID + ":*"))
+                .thenReturn(Collections.singletonMap("karmaCoinConvertLock:" + USER_ID + ":req-other", "60"));
+
+        // unredeemed = 100-0 = 100, but 60 is already claimed by the other pending request, so only
+        // 40 is actually available; asking for 50 must be rejected even though 50 <= 100
+        SBApiResponse response = service.redeem(TOKEN, redeemRequest(50, "req-2"));
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getResponseCode());
+        assertEquals(Constants.INSUFFICIENT_KARMA_POINTS, response.getParams().getErrmsg());
+        verify(kafkaProducer, never()).push(anyString(), anyString(), any());
+    }
+
+    @Test
     public void redeem_insufficientPoints_partialBalance_returnsBadRequest() {
         mockAuthenticatedAndAuthorized();
         mockDedupGuard(true);
@@ -617,7 +709,11 @@ public class KarmaCoinWalletServiceImplTest {
         assertNotNull(data.get(Constants.EVENT_ETS));
 
         // lock value is the points being converted, so getTransactions can read it back later
-        verify(redisCacheMgr).setIfAbsent(eq("karmaCoinConvertLock:" + USER_ID), eq("50"), eq(DEDUP_TTL));
+        verify(redisCacheMgr).setIfAbsent(
+                "karmaCoinConvertLock:" + USER_ID + ":req-1",
+                "50",
+                DEDUP_TTL
+        );
     }
 
     @Test
