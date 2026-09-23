@@ -521,6 +521,32 @@ public class KarmaCoinWalletServiceImplTest {
     @SuppressWarnings("unchecked")
     public void getTransactions_pendingEnrolmentTerminalStatus_notShownAsInProgress() {
         mockAuthenticatedAndAuthorized();
+        when(cassandraOperation.getRecordsByPropertiesWithClusteringRange(anyString(), anyString(), anyMap(),
+                anyList(), anyString(), any(), any()))
+                .thenReturn(Collections.emptyList());
+        when(redisCacheMgr.getValuesByPattern("karmaCoinConvertLock:" + USER_ID + ":*")).thenReturn(Collections.emptyMap());
+        // once redemption completes, karma-points-processor-v2 overwrites the value with a bare
+        // status string ("SUCCESS"/"FAILED") instead of JSON - that's terminal, not pending
+        when(redisCacheMgr.getValuesByRawPattern("pendingEnrolment_" + USER_ID + "_*"))
+                .thenReturn(Collections.singletonMap("pendingEnrolment_" + USER_ID + "_ext_123", "SUCCESS"));
+
+        SBApiResponse response = service.getTransactions(TOKEN, transactionRequest("2026-01-01", "2026-01-31", "ALL"));
+
+        assertEquals(HttpStatus.OK, response.getResponseCode());
+        List<Map<String, Object>> txns = (List<Map<String, Object>>) response.getResult().get(Constants.TRANSACTIONS);
+        assertEquals(2, txns.size());
+        Map<String, Object> pending = txns.get(0);
+        assertEquals(Constants.TXN_STATUS_IN_PROGRESS, pending.get(Constants.STATUS));
+        assertEquals(Constants.TXN_TYPE_DEBIT, pending.get(Constants.TYPE));
+        assertEquals(Constants.POINTS_REDEMPTION, pending.get(Constants.ACTION_TYPE_CAMEL));
+        assertEquals("AI-Powered Retail Operations", pending.get(Constants.COURSE_NAME));
+        assertEquals(100, pending.get(Constants.AMOUNT_CAMEL));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void getTransactions_pendingEnrolmentTerminalStatus_notShownAsInProgress() {
+        mockAuthenticatedAndAuthorized();
 
         when(cassandraOperation.getRecordsByPropertiesWithClusteringRange(
                 anyString(), anyString(), anyMap(), anyList(), anyString(), any(), any()))
