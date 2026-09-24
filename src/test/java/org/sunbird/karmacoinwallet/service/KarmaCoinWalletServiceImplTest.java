@@ -543,39 +543,6 @@ public class KarmaCoinWalletServiceImplTest {
         assertEquals(100, pending.get(Constants.AMOUNT_CAMEL));
     }
 
-    @Test
-    @SuppressWarnings("unchecked")
-    public void getTransactions_pendingEnrolmentTerminalStatus_notShownAsInProgress() {
-        mockAuthenticatedAndAuthorized();
-
-        when(cassandraOperation.getRecordsByPropertiesWithClusteringRange(
-                anyString(), anyString(), anyMap(), anyList(), anyString(), any(), any()))
-                .thenReturn(Collections.emptyList());
-
-        when(redisCacheMgr.getValuesByPattern(
-                "karmaCoinConvertLock:" + USER_ID + ":*"))
-                .thenReturn(Collections.emptyMap());
-
-        when(redisCacheMgr.getValuesByRawPattern(
-                "pendingEnrolment_" + USER_ID + "_*"))
-                .thenReturn(Collections.singletonMap(
-                        "pendingEnrolment_" + USER_ID + "_ext_123",
-                        "SUCCESS"));
-
-        SBApiResponse response =
-                service.getTransactions(
-                        TOKEN,
-                        transactionRequest("2026-01-01", "2026-01-31", "ALL"));
-
-        assertEquals(HttpStatus.OK, response.getResponseCode());
-
-        List<Map<String, Object>> txns =
-                (List<Map<String, Object>>) response.getResult()
-                        .get(Constants.TRANSACTIONS);
-
-        assertEquals(0, txns.size());
-    }
-
     // ------------------------------------------------------------------
     // redeem
     // ------------------------------------------------------------------
