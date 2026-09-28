@@ -202,7 +202,7 @@ public class KarmaCoinWalletServiceImpl implements KarmaCoinWalletService {
             Map<String, String> pendingEnrolments = redisCacheMgr.getValuesByRawPattern(buildPendingEnrolmentPattern(userId), 1);
             for (String enrolmentValue : pendingEnrolments.values()) {
                 Map<String, Object> enrolmentInfo = parsePendingEnrolment(enrolmentValue);
-                if (enrolmentInfo != null) {
+                if (MapUtils.isNotEmpty(enrolmentInfo)) {
                     transactions.add(0, buildPendingRedemptionView(enrolmentInfo));
                 }
             }
