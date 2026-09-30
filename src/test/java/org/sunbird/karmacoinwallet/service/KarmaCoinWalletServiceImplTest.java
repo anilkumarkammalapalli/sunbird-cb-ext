@@ -188,7 +188,7 @@ public class KarmaCoinWalletServiceImplTest {
         // min(cap - converted=80, unredeemed=60) = 60
         assertEquals(60, result.get(Constants.CONVERTIBLE_THIS_MONTH));
         assertEquals(Boolean.TRUE, result.get(Constants.REDEEM_ENABLED));
-        assertEquals(YearMonth.now().toString(), result.get(Constants.YEAR_MONTH_CAMEL));
+        assertEquals(YearMonth.now(ZoneId.of(Constants.ASIA_KOLKATA_TIMEZONE)).toString(), result.get(Constants.YEAR_MONTH_CAMEL));
         assertNotNull(result.get(Constants.CAP_RESETS_ON));
     }
 
@@ -725,7 +725,7 @@ public class KarmaCoinWalletServiceImplTest {
         assertEquals(50, data.get(Constants.POINTS_TO_CONVERT));
         assertEquals(Constants.POINTS_CONVERSION, data.get(Constants.CONTEXT_TYPE));
         assertEquals("req-1", data.get(Constants.CONTEXT_ID_CAMEL));
-        assertEquals(YearMonth.now().toString(), data.get(Constants.CONVERSION_PERIOD));
+        assertEquals(YearMonth.now(ZoneId.of(Constants.ASIA_KOLKATA_TIMEZONE)).toString(), data.get(Constants.CONVERSION_PERIOD));
         assertNotNull(data.get(Constants.EVENT_ETS));
 
         // lock value is the points being converted, so getTransactions can read it back later
