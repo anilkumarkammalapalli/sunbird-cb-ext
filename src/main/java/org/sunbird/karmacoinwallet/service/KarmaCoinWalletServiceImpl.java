@@ -178,11 +178,16 @@ public class KarmaCoinWalletServiceImpl implements KarmaCoinWalletService {
         }
 
         try {
+            long cassandraStart = System.currentTimeMillis();
             Map<String, Object> propertyMap = new HashMap<>();
             propertyMap.put(Constants.KARMA_POINTS_USER_ID, userId);
             List<Map<String, Object>> rows = cassandraOperation.getRecordsByPropertiesWithClusteringRange(
                     Constants.KEYSPACE_SUNBIRD, Constants.TABLE_USER_KARMA_COIN_TRANSACTIONS, propertyMap,
                     new ArrayList<>(), Constants.DB_COLUMN_TXN_CREATED_AT, startDate, endDate);
+            logger.info("karmawallet.transactions timing: cassandraQueryMs={} rowCount={} userId={} rangeDays={}",
+                    System.currentTimeMillis() - cassandraStart, rows.size(), userId,
+                    java.time.temporal.ChronoUnit.DAYS.between(
+                            java.time.Instant.ofEpochMilli(startDate), java.time.Instant.ofEpochMilli(endDate)));
 
             List<Map<String, Object>> transactions = new ArrayList<>();
             for (Map<String, Object> row : rows) {
@@ -192,14 +197,21 @@ public class KarmaCoinWalletServiceImpl implements KarmaCoinWalletService {
                 }
                 transactions.add(toTransactionView(row));
             }
+
+            long lockScanStart = System.currentTimeMillis();
             Map<String, String> pendingLocks = redisCacheMgr.getValuesByPattern(buildConvertLockPattern(userId));
+            logger.info("karmawallet.transactions timing: pendingLockScanMs={} matchCount={} userId={}",
+                    System.currentTimeMillis() - lockScanStart, pendingLocks.size(), userId);
             for (String pendingPointsValue : pendingLocks.values()) {
                 if (StringUtils.isNotBlank(pendingPointsValue) && StringUtils.isNumeric(pendingPointsValue.trim())) {
                     transactions.add(0, buildPendingTransactionView(Integer.parseInt(pendingPointsValue.trim())));
                 }
             }
 
+            long enrolmentScanStart = System.currentTimeMillis();
             Map<String, String> pendingEnrolments = redisCacheMgr.getValuesByRawPattern(buildPendingEnrolmentPattern(userId), 1);
+            logger.info("karmawallet.transactions timing: pendingEnrolmentScanMs={} matchCount={} userId={}",
+                    System.currentTimeMillis() - enrolmentScanStart, pendingEnrolments.size(), userId);
             for (String enrolmentValue : pendingEnrolments.values()) {
                 Map<String, Object> enrolmentInfo = parsePendingEnrolment(enrolmentValue);
                 if (MapUtils.isNotEmpty(enrolmentInfo)) {
@@ -368,14 +380,23 @@ public class KarmaCoinWalletServiceImpl implements KarmaCoinWalletService {
             return response;
         }
         try {
+            long redeemStart = System.currentTimeMillis();
             String currentYearMonth = YearMonth.now(ZoneId.of(Constants.ASIA_KOLKATA_TIMEZONE)).toString();
+            long walletReadStart = System.currentTimeMillis();
             WalletSnapshot snapshot = loadWalletAndMonthly(userId, currentYearMonth);
+            long walletReadMs = System.currentTimeMillis() - walletReadStart;
             int totalEarned = snapshot.totalEarned;
             int convertedThisMonth = snapshot.convertedThisMonth;
+            long pointsReadStart = System.currentTimeMillis();
             int totalKarmaPoints = fetchTotalKarmaPoints(userId);
+            long pointsReadMs = System.currentTimeMillis() - pointsReadStart;
             int monthlyCap = serverProperties.getKarmaCoinMonthlyCap();
             String inProgressKey = buildConvertLockKey(userId, requestId);
+            long lockScanStart = System.currentTimeMillis();
             int otherPendingPoints = sumOtherPendingPoints(userId, inProgressKey);
+            long lockScanMs = System.currentTimeMillis() - lockScanStart;
+            logger.info("karmawallet.redeem timing: walletReadMs={} pointsReadMs={} lockScanMs={} userId={} requestId={}",
+                    walletReadMs, pointsReadMs, lockScanMs, userId, requestId);
             int unredeemedKarmaPoints = Math.max(0, totalKarmaPoints - totalEarned - otherPendingPoints);
             int remainingCap = Math.max(0, monthlyCap - convertedThisMonth - otherPendingPoints);
             int convertibleThisMonth = Math.min(remainingCap, unredeemedKarmaPoints);
@@ -409,7 +430,11 @@ public class KarmaCoinWalletServiceImpl implements KarmaCoinWalletService {
             event.put(Constants.EVENT_TYPE, Constants.POINTS_CONVERSION);
             event.put(Constants.DATA, data);
             event.put(Constants.EVENT_VERSION, serverProperties.getKarmaCoinWalletRedeemEventVersion());
+            long kafkaPushStart = System.currentTimeMillis();
             kafkaProducer.push(serverProperties.getKarmaCoinWalletRedeemTopic(), userId, event);
+            long kafkaPushMs = System.currentTimeMillis() - kafkaPushStart;
+            logger.info("karmawallet.redeem timing: kafkaPushMs={} totalMs={} userId={} requestId={}",
+                    kafkaPushMs, System.currentTimeMillis() - redeemStart, userId, requestId);
             Map<String, Object> result = new HashMap<>();
             result.put(Constants.REQUEST_ID, requestId);
             result.put(Constants.STATUS, Constants.PROCESSING);
