@@ -18,8 +18,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisPool;
-import redis.clients.jedis.ScanParams;
-import redis.clients.jedis.ScanResult;
 import javax.annotation.PostConstruct;
 
 @Component
@@ -183,47 +181,19 @@ public class RedisCacheMgr {
     }
 
     /**
-     * Finds every key matching {@code pattern} (glob syntax) in the raw keyspace, with no {@code CB_EXT_}
-     * prefix applied, via {@code SCAN} and returns their values - for keys written by other services that talk to this Redis instance directly
-     * (e.g. Flink jobs using jobs-core's {@code DataCache}, which does not use the {@code CB_EXT_}
-     * convention).
+     * Same as {@link #hgetAll} but against the raw keyspace (no {@code CB_EXT_} prefix) and the given
+     * database {@code index} - for keys written by other services that share this Redis instance
+     * directly (e.g. {@code karma-points-processor-v2}'s pending-enrolment hash), as a single
+     * {@code HGETALL} on a known key instead of a keyspace-wide {@code SCAN}.
      */
-    public Map<String, String> getValuesByRawPattern(String pattern) {
-        return scanValues(pattern, "", null);
-    }
-
-    /**
-     * Same as {@link #getValuesByRawPattern(String)} but selects the given Redis database
-     * {@code index} first - for keys written by services that share this Redis instance but use a
-     * non-default database (e.g. {@code karma-points-processor-v2}'s pending-enrolment keys).
-     */
-    public Map<String, String> getValuesByRawPattern(String pattern, int index) {
-        return scanValues(pattern, "", index);
-    }
-
-    private Map<String, String> scanValues(String fullPattern, String keyPrefixToStrip, Integer index) {
-        Map<String, String> result = new HashMap<>();
+    public Map<String, String> hgetAllRaw(String key, int index) {
         try (Jedis jedis = jedisPool.getResource()) {
-            if (index != null) {
-                jedis.select(index);
-            }
-            ScanParams scanParams = new ScanParams().match(fullPattern).count(100);
-            String cursor = ScanParams.SCAN_POINTER_START;
-            do {
-                ScanResult<String> scanResult = jedis.scan(cursor, scanParams);
-                for (String key : scanResult.getResult()) {
-                    String value = jedis.get(key);
-                    if (value != null) {
-                        String resultKey = key.startsWith(keyPrefixToStrip) ? key.substring(keyPrefixToStrip.length()) : key;
-                        result.put(resultKey, value);
-                    }
-                }
-                cursor = scanResult.getStringCursor();
-            } while (!ScanParams.SCAN_POINTER_START.equals(cursor));
+            jedis.select(index);
+            return jedis.hgetAll(key);
         } catch (Exception e) {
             logger.error(e);
+            return Collections.emptyMap();
         }
-        return result;
     }
 
     public List<String> mget(List<String> fields) {

@@ -527,8 +527,8 @@ public class KarmaCoinWalletServiceImplTest {
                 anyList(), anyString(), any(), any()))
                 .thenReturn(Collections.singletonList(row(Constants.TXN_TYPE_CREDIT)));
         when(redisCacheMgr.hgetAll("karmaCoinConvertLock:" + USER_ID)).thenReturn(Collections.emptyMap());
-        when(redisCacheMgr.getValuesByRawPattern("pendingEnrolment_" + USER_ID + "_*", 1)).thenReturn(
-                Collections.singletonMap("pendingEnrolment_" + USER_ID + "_ext_123",
+        when(redisCacheMgr.hgetAllRaw("pendingEnrolment_" + USER_ID, 1)).thenReturn(
+                Collections.singletonMap("ext_123",
                         "{\"courseName\":\"AI-Powered Retail Operations\",\"karmaCoins\":100,\"status\":\"Pending\"}"));
 
         SBApiResponse response = service.getTransactions(TOKEN, transactionRequest("2026-01-01", "2026-01-31", "ALL"));
@@ -555,8 +555,8 @@ public class KarmaCoinWalletServiceImplTest {
         when(redisCacheMgr.hgetAll("karmaCoinConvertLock:" + USER_ID)).thenReturn(Collections.emptyMap());
         // once redemption completes, karma-points-processor-v2 overwrites the value with a bare
         // status string ("SUCCESS"/"FAILED") instead of JSON - that's terminal, not pending
-        when(redisCacheMgr.getValuesByRawPattern("pendingEnrolment_" + USER_ID + "_*", 1))
-                .thenReturn(Collections.singletonMap("pendingEnrolment_" + USER_ID + "_ext_123", "SUCCESS"));
+        when(redisCacheMgr.hgetAllRaw("pendingEnrolment_" + USER_ID, 1))
+                .thenReturn(Collections.singletonMap("ext_123", "SUCCESS"));
 
         SBApiResponse response = service.getTransactions(TOKEN, transactionRequest("2026-01-01", "2026-01-31", "ALL"));
 

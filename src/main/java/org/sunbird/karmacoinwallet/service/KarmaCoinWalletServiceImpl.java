@@ -211,10 +211,10 @@ public class KarmaCoinWalletServiceImpl implements KarmaCoinWalletService {
                 transactions.add(0, buildPendingTransactionView(pendingPoints));
             }
 
-            long enrolmentScanStart = System.currentTimeMillis();
-            Map<String, String> pendingEnrolments = redisCacheMgr.getValuesByRawPattern(buildPendingEnrolmentPattern(userId), 1);
-            logger.info("karmawallet.transactions timing: pendingEnrolmentScanMs={} matchCount={} userId={}",
-                    System.currentTimeMillis() - enrolmentScanStart, pendingEnrolments.size(), userId);
+            long enrolmentReadStart = System.currentTimeMillis();
+            Map<String, String> pendingEnrolments = redisCacheMgr.hgetAllRaw(buildPendingEnrolmentHashKey(userId), 1);
+            logger.info("karmawallet.transactions timing: pendingEnrolmentReadMs={} matchCount={} userId={}",
+                    System.currentTimeMillis() - enrolmentReadStart, pendingEnrolments.size(), userId);
             for (String enrolmentValue : pendingEnrolments.values()) {
                 Map<String, Object> enrolmentInfo = parsePendingEnrolment(enrolmentValue);
                 if (MapUtils.isNotEmpty(enrolmentInfo)) {
@@ -637,24 +637,24 @@ public class KarmaCoinWalletServiceImpl implements KarmaCoinWalletService {
     }
 
     /**
-     * Builds the raw {@code SCAN} glob pattern for every in-flight COINS_REDEMPTION (paid-course
-     * enrolment) request for a user. Keys are written directly by the upstream caller and updated
-     * by {@code karma-points-processor-v2}'s {@code RedisUtil.pendingEnrolmentKeyFor}, in the raw
-     * (non-{@code CB_EXT_}) keyspace those jobs share with this service - hence
-     * {@link RedisCacheMgr#getValuesByRawPattern}, not the prefixed variant used for our own locks.
+     * Builds the raw Redis HASH key holding every in-flight COINS_REDEMPTION (paid-course enrolment)
+     * request for a user - one key per user, with each enrolment's {@code contextId} as a hash field.
+     * Written directly by {@code karma-points-processor-v2} in the raw (non-{@code CB_EXT_}) keyspace
+     * those jobs share with this service - hence {@link RedisCacheMgr#hgetAllRaw}, not the prefixed
+     * variant used for our own locks.
      */
-    private String buildPendingEnrolmentPattern(String userId) {
-        return Constants.PENDING_ENROLMENT_KEY_PREFIX + "_" + userId + "_*";
+    private String buildPendingEnrolmentHashKey(String userId) {
+        return Constants.PENDING_ENROLMENT_KEY_PREFIX + "_" + userId;
     }
 
     /**
-     * Parses a {@code pendingEnrolment_<userId>_<contextId>} value as the enrolment-info JSON object
+     * Parses a {@code pendingEnrolment_<userId>} hash field's value as the enrolment-info JSON object
      * (e.g. {@code courseName}/{@code karmaCoins}/{@code status}) written before the redemption request
      * was published. Only a value whose {@code status} is still {@code Pending} is returned. Once the
      * redemption reaches a terminal state, {@code RedisUtil.setPendingEnrolmentStatus} overwrites the
      * value with a bare status string ({@code SUCCESS}/{@code FAILED}) instead of JSON - that case (and
      * any other malformed or non-pending value) returns {@code null} so the caller skips it, since a
-     * completed redemption already has its own row in {@code user_karma_coin_transactions}. These keys
+     * completed redemption already has its own row in {@code user_karma_coin_transactions}. These fields
      * have no TTL, so a terminal value can otherwise linger in Redis and be re-parsed on every call.
      */
     @SuppressWarnings("unchecked")
