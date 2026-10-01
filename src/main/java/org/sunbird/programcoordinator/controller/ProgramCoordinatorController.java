@@ -3,6 +3,7 @@ package org.sunbird.programcoordinator.controller;
 import javax.validation.Valid;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.io.Resource;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -102,6 +103,32 @@ public class ProgramCoordinatorController {
 
         SBApiResponse response = programCoordinatorBulkUploadService.getStatus(programId, identifier, token);
         return new ResponseEntity<>(response, response.getResponseCode());
+    }
+
+    /**
+     * Lists every bulk upload job submitted for this programme - a history/log view, same shape
+     * as the older govt user bulk-upload's GET /user/v1/bulkupload/{orgId}.
+     */
+    @GetMapping("/program/coordinator/bulk-upload/{programId}")
+    public ResponseEntity<SBApiResponse> getBulkUploadList(
+            @PathVariable(PROGRAM_ID) String programId,
+            @RequestHeader(X_AUTH_TOKEN) String token) {
+
+        SBApiResponse response = programCoordinatorBulkUploadService.getBulkUploadList(programId, token);
+        return new ResponseEntity<>(response, response.getResponseCode());
+    }
+
+    /**
+     * Downloads an uploaded or result file by name, proxying it through this service rather than
+     * handing back the raw cloud storage URL - same approach as the older govt user bulk-upload's
+     * GET /user/v1/bulkuser/download/{fileName}.
+     */
+    @GetMapping("/program/coordinator/bulk-upload/{programId}/download/{fileName}")
+    public ResponseEntity<Resource> downloadBulkUploadFile(
+            @PathVariable(PROGRAM_ID) String programId,
+            @PathVariable("fileName") String fileName) {
+
+        return programCoordinatorBulkUploadService.downloadFile(fileName);
     }
 
 }

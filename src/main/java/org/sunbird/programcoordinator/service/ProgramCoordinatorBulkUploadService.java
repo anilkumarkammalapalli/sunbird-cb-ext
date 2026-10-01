@@ -1,5 +1,7 @@
 package org.sunbird.programcoordinator.service;
 
+import org.springframework.core.io.Resource;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.multipart.MultipartFile;
 import org.sunbird.common.model.SBApiResponse;
 
@@ -28,4 +30,18 @@ public interface ProgramCoordinatorBulkUploadService {
      * Reads back the tracking record for a previously submitted bulk upload.
      */
     SBApiResponse getStatus(String programId, String identifier, String userAuthToken);
+
+    /**
+     * Lists every bulk upload job ever submitted for this programme (not just one by identifier) -
+     * a history/log view, same shape as ProfileServiceImpl.getBulkUploadDetails(orgId) does for
+     * the older govt user bulk-upload flow.
+     */
+    SBApiResponse getBulkUploadList(String programId, String userAuthToken);
+
+    /**
+     * Downloads an uploaded or result file by name, proxying it through this service rather than
+     * handing back the raw cloud storage URL - same approach as
+     * ProfileServiceImpl.downloadFile(fileName) for the older govt user bulk-upload flow.
+     */
+    ResponseEntity<Resource> downloadFile(String fileName);
 }
