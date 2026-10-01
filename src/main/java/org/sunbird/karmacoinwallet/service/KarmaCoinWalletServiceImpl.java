@@ -21,11 +21,16 @@ import org.sunbird.common.util.CbExtServerProperties;
 import org.sunbird.common.util.Constants;
 import org.sunbird.common.util.ProjectUtil;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.sunbird.consumer.KafkaProducer;
 
 @Service
 public class KarmaCoinWalletServiceImpl implements KarmaCoinWalletService {
+
+    /** Field names inside a {@code karmaCoinConvertLock} hash value (the Flink job only deletes the field, it never reads the value). */
+    private static final String LOCK_FIELD_POINTS = "points";
+    private static final String LOCK_FIELD_TS = "ts";
 
     private final CassandraOperation cassandraOperation;
 
@@ -198,14 +203,12 @@ public class KarmaCoinWalletServiceImpl implements KarmaCoinWalletService {
                 transactions.add(toTransactionView(row));
             }
 
-            long lockScanStart = System.currentTimeMillis();
-            Map<String, String> pendingLocks = redisCacheMgr.getValuesByPattern(buildConvertLockPattern(userId));
-            logger.info("karmawallet.transactions timing: pendingLockScanMs={} matchCount={} userId={}",
-                    System.currentTimeMillis() - lockScanStart, pendingLocks.size(), userId);
-            for (String pendingPointsValue : pendingLocks.values()) {
-                if (StringUtils.isNotBlank(pendingPointsValue) && StringUtils.isNumeric(pendingPointsValue.trim())) {
-                    transactions.add(0, buildPendingTransactionView(Integer.parseInt(pendingPointsValue.trim())));
-                }
+            long lockReadStart = System.currentTimeMillis();
+            Map<String, Integer> pendingConversions = readPendingConversions(userId);
+            logger.info("karmawallet.transactions timing: pendingLockReadMs={} matchCount={} userId={}",
+                    System.currentTimeMillis() - lockReadStart, pendingConversions.size(), userId);
+            for (int pendingPoints : pendingConversions.values()) {
+                transactions.add(0, buildPendingTransactionView(pendingPoints));
             }
 
             long enrolmentScanStart = System.currentTimeMillis();
@@ -391,12 +394,12 @@ public class KarmaCoinWalletServiceImpl implements KarmaCoinWalletService {
             int totalKarmaPoints = fetchTotalKarmaPoints(userId);
             long pointsReadMs = System.currentTimeMillis() - pointsReadStart;
             int monthlyCap = serverProperties.getKarmaCoinMonthlyCap();
-            String inProgressKey = buildConvertLockKey(userId, requestId);
-            long lockScanStart = System.currentTimeMillis();
-            int otherPendingPoints = sumOtherPendingPoints(userId, inProgressKey);
-            long lockScanMs = System.currentTimeMillis() - lockScanStart;
-            logger.info("karmawallet.redeem timing: walletReadMs={} pointsReadMs={} lockScanMs={} userId={} requestId={}",
-                    walletReadMs, pointsReadMs, lockScanMs, userId, requestId);
+            String lockKey = buildConvertLockKey(userId);
+            long lockReadStart = System.currentTimeMillis();
+            int otherPendingPoints = sumOtherPendingPoints(userId, requestId);
+            long lockReadMs = System.currentTimeMillis() - lockReadStart;
+            logger.info("karmawallet.redeem timing: walletReadMs={} pointsReadMs={} lockReadMs={} userId={} requestId={}",
+                    walletReadMs, pointsReadMs, lockReadMs, userId, requestId);
             int unredeemedKarmaPoints = Math.max(0, totalKarmaPoints - totalEarned - otherPendingPoints);
             int remainingCap = Math.max(0, monthlyCap - convertedThisMonth - otherPendingPoints);
             int convertibleThisMonth = Math.min(remainingCap, unredeemedKarmaPoints);
@@ -408,7 +411,8 @@ public class KarmaCoinWalletServiceImpl implements KarmaCoinWalletService {
                 setError(response, Constants.MONTHLY_CAP_EXCEEDED, HttpStatus.BAD_REQUEST);
                 return response;
             }
-            boolean requestClaimed = redisCacheMgr.setIfAbsent(inProgressKey, String.valueOf(pointsToConvert), serverProperties.getKarmaCoinConvertLockTtl());
+            boolean requestClaimed = redisCacheMgr.hsetIfAbsent(lockKey, requestId, buildConvertLockValue(pointsToConvert),
+                    serverProperties.getKarmaCoinConvertLockTtl());
             if (!requestClaimed) {
                 setError(response, Constants.CONVERSION_REQUEST_IN_PROGRESS, HttpStatus.CONFLICT);
                 return response;
@@ -536,16 +540,16 @@ public class KarmaCoinWalletServiceImpl implements KarmaCoinWalletService {
     }
 
     /**
-     * Builds the Redis key for a single in-flight conversion request from the configured pattern
-     * (default {@code karmaCoinConvertLock:{userId}:{requestId}}). Keying by {@code requestId} as
-     * well as {@code userId} means concurrent conversions from different tabs/requests each get
-     * their own lock instead of colliding on a single per-user key; {@link #buildConvertLockPattern}
-     * is what lets callers still discover every lock for a user.
+     * Builds the Redis hash key holding every in-flight conversion request for a user, from the
+     * configured pattern (default {@code karmaCoinConvertLock:{userId}}). Each request is one field
+     * ({@code requestId}) of that hash, so concurrent conversions from different tabs get their own
+     * field without colliding, and all of a user's locks are read with a single {@code HGETALL}
+     * instead of a keyspace {@code SCAN}. {@code karma-points-processor-v2} derives the same key and
+     * {@code HDEL}s the field once the conversion reaches a terminal state.
      */
-    private String buildConvertLockKey(String userId, String requestId) {
+    private String buildConvertLockKey(String userId) {
         Map<String, String> tokens = new HashMap<>();
         tokens.put("userId", userId);
-        tokens.put("requestId", requestId);
         tokens.put("contextType", Constants.POINTS_CONVERSION);
         String key = serverProperties.getKarmaCoinConvertLockKeyPattern();
         for (Map.Entry<String, String> token : tokens.entrySet()) {
@@ -555,29 +559,61 @@ public class KarmaCoinWalletServiceImpl implements KarmaCoinWalletService {
     }
 
     /**
-     * Builds the {@code SCAN} glob pattern that matches every in-flight conversion lock for a user,
-     * by substituting {@code {requestId}} with {@code *} in the same configured pattern used by
-     * {@link #buildConvertLockKey}, so the two never drift apart.
+     * Lock field value: the points being converted plus the claim timestamp. Redis 6 has no
+     * per-field TTL, so the timestamp is what gives each request its own
+     * {@code karma.coin.convert.lock.ttl} window (see {@link #readPendingConversions}).
      */
-    private String buildConvertLockPattern(String userId) {
-        return buildConvertLockKey(userId, "*");
+    private String buildConvertLockValue(int pointsToConvert) throws JsonProcessingException {
+        Map<String, Object> value = new HashMap<>();
+        value.put(LOCK_FIELD_POINTS, pointsToConvert);
+        value.put(LOCK_FIELD_TS, System.currentTimeMillis());
+        return objectMapper.writeValueAsString(value);
     }
 
     /**
-     * Sums the points held by every other in-flight conversion lock for this user (i.e. excluding
-     * {@code ownKey}), so a new request's balance/cap validation accounts for amounts other
-     * concurrent requests have already claimed but not yet committed.
+     * Reads every in-flight conversion for the user as {@code requestId -> points}. A field whose
+     * claim timestamp is older than the lock TTL is treated as expired: skipped and lazily
+     * {@code HDEL}ed (the Flink job normally removes the field on completion; this covers the API
+     * claiming the lock but failing to publish the event, or the job's delete failing). Malformed
+     * values are skipped so a corrupt field can never break the endpoint.
      */
-    private int sumOtherPendingPoints(String userId, String ownKey) {
-        Map<String, String> pending = redisCacheMgr.getValuesByPattern(buildConvertLockPattern(userId));
-        int sum = 0;
-        for (Map.Entry<String, String> entry : pending.entrySet()) {
-            if (ownKey.equals(entry.getKey())) {
+    @SuppressWarnings("unchecked")
+    private Map<String, Integer> readPendingConversions(String userId) {
+        String lockKey = buildConvertLockKey(userId);
+        long ttlMillis = serverProperties.getKarmaCoinConvertLockTtl() * 1000L;
+        long now = System.currentTimeMillis();
+        Map<String, Integer> pending = new HashMap<>();
+        for (Map.Entry<String, String> entry : redisCacheMgr.hgetAll(lockKey).entrySet()) {
+            Map<String, Object> value;
+            try {
+                value = objectMapper.readValue(entry.getValue(), Map.class);
+            } catch (Exception e) {
                 continue;
             }
-            String value = entry.getValue();
-            if (StringUtils.isNotBlank(value) && StringUtils.isNumeric(value.trim())) {
-                sum += Integer.parseInt(value.trim());
+            Object points = value.get(LOCK_FIELD_POINTS);
+            Object ts = value.get(LOCK_FIELD_TS);
+            if (!(points instanceof Number) || !(ts instanceof Number)) {
+                continue;
+            }
+            if (now - ((Number) ts).longValue() > ttlMillis) {
+                redisCacheMgr.hdel(lockKey, entry.getKey());
+                continue;
+            }
+            pending.put(entry.getKey(), ((Number) points).intValue());
+        }
+        return pending;
+    }
+
+    /**
+     * Sums the points held by every other in-flight conversion for this user (i.e. excluding
+     * {@code ownRequestId}), so a new request's balance/cap validation accounts for amounts other
+     * concurrent requests have already claimed but not yet committed.
+     */
+    private int sumOtherPendingPoints(String userId, String ownRequestId) {
+        int sum = 0;
+        for (Map.Entry<String, Integer> entry : readPendingConversions(userId).entrySet()) {
+            if (!ownRequestId.equals(entry.getKey())) {
+                sum += entry.getValue();
             }
         }
         return sum;

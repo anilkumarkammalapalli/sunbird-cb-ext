@@ -108,6 +108,45 @@ public class RedisCacheMgr {
         }
     }
 
+    /**
+     * Hash-field variant of {@link #setIfAbsent}: {@code HSETNX} on {@code CB_EXT_<key>} and, when the
+     * field was newly created, refreshes the key-level TTL. Redis 6 has no per-field TTL, so that TTL
+     * is only a safety net for an abandoned hash; a caller that needs per-field expiry stores a
+     * timestamp in the value and filters on read. Fails open (returns true) on Redis errors, same as
+     * {@link #setIfAbsent}.
+     */
+    public boolean hsetIfAbsent(String key, String field, String value, int ttlInSeconds) {
+        try (Jedis jedis = jedisPool.getResource()) {
+            boolean created = jedis.hsetnx(Constants.REDIS_COMMON_KEY + key, field, value) == 1L;
+            if (created) {
+                jedis.expire(Constants.REDIS_COMMON_KEY + key, ttlInSeconds);
+            }
+            return created;
+        } catch (Exception e) {
+            logger.error(e);
+            return true;
+        }
+    }
+
+    public Map<String, String> hgetAll(String key) {
+        try (Jedis jedis = jedisPool.getResource()) {
+            return jedis.hgetAll(Constants.REDIS_COMMON_KEY + key);
+        } catch (Exception e) {
+            logger.error(e);
+            return Collections.emptyMap();
+        }
+    }
+
+    public boolean hdel(String key, String field) {
+        try (Jedis jedis = jedisPool.getResource()) {
+            jedis.hdel(Constants.REDIS_COMMON_KEY + key, field);
+            return true;
+        } catch (Exception e) {
+            logger.error(e);
+            return false;
+        }
+    }
+
     public boolean deleteKeyByName(String key) {
         try (Jedis jedis = jedisPool.getResource()) {
         	jedis.del(Constants.REDIS_COMMON_KEY + key);
@@ -144,20 +183,8 @@ public class RedisCacheMgr {
     }
 
     /**
-     * Finds every key matching {@code pattern} (glob syntax, e.g. {@code "karmaCoinConvertLock:user1:*"})
-     * under the standard {@code CB_EXT_} namespace via {@code SCAN} and returns their values, keyed
-     * by the un-prefixed key name. Uses a cursor loop rather than {@code KEYS} so it never blocks the
-     * whole Redis instance, but it still walks the keyspace and runs on the calling thread, so it is
-     * only safe for patterns expected to match a small, bounded number of keys (e.g. per-user locks),
-     * not for cache-wide sweeps.
-     */
-    public Map<String, String> getValuesByPattern(String pattern) {
-        return scanValues(Constants.REDIS_COMMON_KEY + pattern, Constants.REDIS_COMMON_KEY, null);
-    }
-
-    /**
-     * Same as {@link #getValuesByPattern(String)} but against the raw keyspace, with no {@code CB_EXT_}
-     * prefix applied - for keys written by other services that talk to this Redis instance directly
+     * Finds every key matching {@code pattern} (glob syntax) in the raw keyspace, with no {@code CB_EXT_}
+     * prefix applied, via {@code SCAN} and returns their values - for keys written by other services that talk to this Redis instance directly
      * (e.g. Flink jobs using jobs-core's {@code DataCache}, which does not use the {@code CB_EXT_}
      * convention).
      */
