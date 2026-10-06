@@ -24,6 +24,9 @@ import org.sunbird.common.model.SearchUserApiResp;
 import org.sunbird.common.service.OutboundRequestHandlerServiceImpl;
 import org.sunbird.common.util.CbExtServerProperties;
 import org.sunbird.common.util.Constants;
+import org.sunbird.programcoordinator.entity.ProgramCoordinatorRoleEntity;
+import org.sunbird.programcoordinator.repository.ProgramCoordinatorRepository;
+import org.sunbird.programcoordinator.repository.ProgramCoordinatorRoleRepository;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -32,6 +35,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 @Service
 public class SmtToSltUpgradeServiceImpl implements SmtToSltUpgradeService {
@@ -46,13 +50,21 @@ public class SmtToSltUpgradeServiceImpl implements SmtToSltUpgradeService {
 
     private final RestHighLevelClient sbEsClient;
 
+    private final ProgramCoordinatorRepository programCoordinatorRepository;
+
+    private final ProgramCoordinatorRoleRepository programCoordinatorRoleRepository;
+
     public SmtToSltUpgradeServiceImpl(CbExtServerProperties props,
             OutboundRequestHandlerServiceImpl outboundRequestHandlerService, ObjectMapper objectMapper,
-            @Qualifier("sbEsClient") RestHighLevelClient sbEsClient) {
+            @Qualifier("sbEsClient") RestHighLevelClient sbEsClient,
+            ProgramCoordinatorRepository programCoordinatorRepository,
+            ProgramCoordinatorRoleRepository programCoordinatorRoleRepository) {
         this.props = props;
         this.outboundRequestHandlerService = outboundRequestHandlerService;
         this.objectMapper = objectMapper;
         this.sbEsClient = sbEsClient;
+        this.programCoordinatorRepository = programCoordinatorRepository;
+        this.programCoordinatorRoleRepository = programCoordinatorRoleRepository;
     }
 
     @Value("${smt.role.code:STATE_MASTER_TRAINER}")
@@ -257,11 +269,47 @@ public class SmtToSltUpgradeServiceImpl implements SmtToSltUpgradeService {
                     props.getSbUrl() + props.getLmsUserUpdatePrivatePath(), request,
                     org.sunbird.common.util.ProjectUtil.getDefaultHeaders());
 
-            return MapUtils.isNotEmpty(readData)
+            boolean profileUpdated = MapUtils.isNotEmpty(readData)
                     && StringUtils.equalsIgnoreCase(Constants.OK, (String) readData.get(Constants.RESPONSE_CODE));
+
+            if (profileUpdated) {
+                syncProgramCoordinatorRole(userId);
+            }
+
+            return profileUpdated;
         } catch (Exception e) {
             logger.error("Failed to upgrade bpCoTrainer for userId: {}", userId, e);
             return false;
         }
+    }
+
+    /**
+     * Keeps program_coordinator.role_id in sync with the profile-level promotion: every active
+     * program assignment this user holds under the SMT role is moved to the SLT role. created_by
+     * is never touched by this - it must keep recording who originally added this coordinator.
+     * Failure here is logged and swallowed so it never undoes the already-successful profile
+     * upgrade.
+     */
+    private void syncProgramCoordinatorRole(String userId) {
+        try {
+            Short smtRoleId = resolveRoleId(smtRoleCode);
+            Short sltRoleId = resolveRoleId(sltRoleCode);
+            if (smtRoleId == null || sltRoleId == null) {
+                logger.error("SmtToSltUpgradeJob: could not resolve SMT/SLT role ids for program_coordinator sync, "
+                        + "userId={}", userId);
+                return;
+            }
+            int rows = programCoordinatorRepository.updateRoleIdForUser(UUID.fromString(userId), smtRoleId, sltRoleId);
+            logger.info("SmtToSltUpgradeJob: synced program_coordinator role_id for userId={}, rowsUpdated={}",
+                    userId, rows);
+        } catch (Exception ex) {
+            logger.error("SmtToSltUpgradeJob: failed to sync program_coordinator role_id for userId={}", userId, ex);
+        }
+    }
+
+    private Short resolveRoleId(String roleCode) {
+        return programCoordinatorRoleRepository.findByRoleCode(roleCode)
+                .map(ProgramCoordinatorRoleEntity::getId)
+                .orElse(null);
     }
 }

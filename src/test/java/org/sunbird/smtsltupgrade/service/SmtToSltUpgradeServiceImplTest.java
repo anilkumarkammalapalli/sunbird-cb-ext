@@ -44,12 +44,17 @@ import org.sunbird.common.model.SearchUserApiRespResult;
 import org.sunbird.common.service.OutboundRequestHandlerServiceImpl;
 import org.sunbird.common.util.CbExtServerProperties;
 import org.sunbird.common.util.Constants;
+import org.sunbird.programcoordinator.entity.ProgramCoordinatorRoleEntity;
+import org.sunbird.programcoordinator.repository.ProgramCoordinatorRepository;
+import org.sunbird.programcoordinator.repository.ProgramCoordinatorRoleRepository;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 class SmtToSltUpgradeServiceImplTest {
 
     private static final String SMT_USER_ID = "eb05d807-8122-4d25-987f-6aad17a99107";
+    private static final short SMT_ROLE_ID = 30;
+    private static final short SLT_ROLE_ID = 20;
 
     @Mock
     private CbExtServerProperties props;
@@ -59,6 +64,12 @@ class SmtToSltUpgradeServiceImplTest {
 
     @Mock
     private ObjectMapper objectMapper;
+
+    @Mock
+    private ProgramCoordinatorRepository programCoordinatorRepository;
+
+    @Mock
+    private ProgramCoordinatorRoleRepository programCoordinatorRoleRepository;
 
     private TestableSmtToSltUpgradeService service;
 
@@ -70,8 +81,11 @@ class SmtToSltUpgradeServiceImplTest {
         private final Deque<Object> searchResults = new ArrayDeque<>();
 
         TestableSmtToSltUpgradeService(CbExtServerProperties props,
-                OutboundRequestHandlerServiceImpl outboundRequestHandlerService, ObjectMapper objectMapper) {
-            super(props, outboundRequestHandlerService, objectMapper, null);
+                OutboundRequestHandlerServiceImpl outboundRequestHandlerService, ObjectMapper objectMapper,
+                ProgramCoordinatorRepository programCoordinatorRepository,
+                ProgramCoordinatorRoleRepository programCoordinatorRoleRepository) {
+            super(props, outboundRequestHandlerService, objectMapper, null, programCoordinatorRepository,
+                    programCoordinatorRoleRepository);
         }
 
         void enqueueSearchResult(Object searchResponseOrException) {
@@ -91,7 +105,8 @@ class SmtToSltUpgradeServiceImplTest {
     @BeforeEach
     void setUp() {
         MockitoAnnotations.initMocks(this);
-        service = new TestableSmtToSltUpgradeService(props, outboundRequestHandlerService, objectMapper);
+        service = new TestableSmtToSltUpgradeService(props, outboundRequestHandlerService, objectMapper,
+                programCoordinatorRepository, programCoordinatorRoleRepository);
         ReflectionTestUtils.setField(service, "smtRoleCode", "STATE_MASTER_TRAINER");
         ReflectionTestUtils.setField(service, "sltRoleCode", "STATE_LEAD_TRAINER");
         ReflectionTestUtils.setField(service, "minCompletedBatches", 3);
@@ -100,6 +115,13 @@ class SmtToSltUpgradeServiceImplTest {
         when(props.getSbUrl()).thenReturn("http://learner-service:9000");
         when(props.getUserSearchEndPoint()).thenReturn("private/user/v1/search");
         when(props.getLmsUserUpdatePrivatePath()).thenReturn("/private/user/v1/update");
+
+        when(programCoordinatorRoleRepository.findByRoleCode("STATE_MASTER_TRAINER"))
+                .thenReturn(java.util.Optional.of(
+                        ProgramCoordinatorRoleEntity.builder().id(SMT_ROLE_ID).roleCode("STATE_MASTER_TRAINER").build()));
+        when(programCoordinatorRoleRepository.findByRoleCode("STATE_LEAD_TRAINER"))
+                .thenReturn(java.util.Optional.of(
+                        ProgramCoordinatorRoleEntity.builder().id(SLT_ROLE_ID).roleCode("STATE_LEAD_TRAINER").build()));
     }
 
     private SearchUserApiResp buildSmtSearchResponse(String... userIds) {
@@ -205,6 +227,59 @@ class SmtToSltUpgradeServiceImplTest {
         assertEquals(1, response.get(Constants.UPGRADED_COUNT));
         assertEquals(0, response.get(Constants.FAILED_COUNT));
         verify(outboundRequestHandlerService).fetchResultUsingPatch(anyString(), any(), anyMap());
+
+        verify(programCoordinatorRepository).updateRoleIdForUser(
+                java.util.UUID.fromString(SMT_USER_ID), SMT_ROLE_ID, SLT_ROLE_ID);
+    }
+
+    @Test
+    void shouldNotSyncProgramCoordinatorRoleWhenProfileUpdateFails() {
+        stubSmtSearch(buildSmtSearchResponse(SMT_USER_ID));
+        service.enqueueSearchResult(buildSearchResponse(Arrays.asList(
+                batchSource("batch-1", 10), batchSource("batch-2", 10), batchSource("batch-3", 10))));
+        Map<String, Object> patchResponse = new HashMap<>();
+        patchResponse.put(Constants.RESPONSE_CODE, "CLIENT_ERROR");
+        when(outboundRequestHandlerService.fetchResultUsingPatch(anyString(), any(), anyMap()))
+                .thenReturn(patchResponse);
+
+        service.runSmtToSltUpgradeCheck();
+
+        verify(programCoordinatorRepository, never()).updateRoleIdForUser(any(), any(), any());
+    }
+
+    @Test
+    void shouldStillUpgradeWhenRoleIdResolutionFailsForSync() {
+        stubSmtSearch(buildSmtSearchResponse(SMT_USER_ID));
+        service.enqueueSearchResult(buildSearchResponse(Arrays.asList(
+                batchSource("batch-1", 10), batchSource("batch-2", 10), batchSource("batch-3", 10))));
+        Map<String, Object> patchResponse = new HashMap<>();
+        patchResponse.put(Constants.RESPONSE_CODE, Constants.OK);
+        when(outboundRequestHandlerService.fetchResultUsingPatch(anyString(), any(), anyMap()))
+                .thenReturn(patchResponse);
+        when(programCoordinatorRoleRepository.findByRoleCode("STATE_MASTER_TRAINER"))
+                .thenReturn(java.util.Optional.empty());
+
+        SBApiResponse response = service.runSmtToSltUpgradeCheck();
+
+        assertEquals(1, response.get(Constants.UPGRADED_COUNT));
+        verify(programCoordinatorRepository, never()).updateRoleIdForUser(any(), any(), any());
+    }
+
+    @Test
+    void shouldStillUpgradeWhenSyncThrowsException() {
+        stubSmtSearch(buildSmtSearchResponse(SMT_USER_ID));
+        service.enqueueSearchResult(buildSearchResponse(Arrays.asList(
+                batchSource("batch-1", 10), batchSource("batch-2", 10), batchSource("batch-3", 10))));
+        Map<String, Object> patchResponse = new HashMap<>();
+        patchResponse.put(Constants.RESPONSE_CODE, Constants.OK);
+        when(outboundRequestHandlerService.fetchResultUsingPatch(anyString(), any(), anyMap()))
+                .thenReturn(patchResponse);
+        when(programCoordinatorRepository.updateRoleIdForUser(any(), any(), any()))
+                .thenThrow(new RuntimeException("db down"));
+
+        SBApiResponse response = service.runSmtToSltUpgradeCheck();
+
+        assertEquals(1, response.get(Constants.UPGRADED_COUNT));
     }
 
     @Test
@@ -399,7 +474,8 @@ class SmtToSltUpgradeServiceImplTest {
         try (RestHighLevelClient esClient = new RestHighLevelClient(
                 RestClient.builder(new HttpHost("localhost", esStub.getAddress().getPort())))) {
             SmtToSltUpgradeServiceImpl realService = new SmtToSltUpgradeServiceImpl(props,
-                    outboundRequestHandlerService, objectMapper, esClient);
+                    outboundRequestHandlerService, objectMapper, esClient, programCoordinatorRepository,
+                    programCoordinatorRoleRepository);
 
             SearchResponse response = realService.executeSearch(new SearchRequest("batch"));
 
