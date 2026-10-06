@@ -1459,6 +1459,7 @@ public class Constants {
 	public static final String PLACE_HOLDERS ="placeholders";
 	public static final String ENGAGEMENT = "ENGAGEMENT";
 	public static final String CONTENT_SHARE = "CONTENT_SHARE";
+	public static final String PROGRAM_COORDINATOR_ADDED = "PROGRAM_COORDINATOR_ADDED";
 	public static final String PROFILE_IMAGE = "profile_image";
 	public static final String TOTAL_POINTS = "total_points";
 	public static final String ROW_NUM = "row_num";
