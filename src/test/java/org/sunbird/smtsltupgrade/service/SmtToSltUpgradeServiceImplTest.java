@@ -10,6 +10,8 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -19,8 +21,12 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import com.sun.net.httpserver.HttpServer;
+import org.apache.http.HttpHost;
 import org.elasticsearch.action.search.SearchRequest;
 import org.elasticsearch.action.search.SearchResponse;
+import org.elasticsearch.client.RestClient;
+import org.elasticsearch.client.RestHighLevelClient;
 import org.elasticsearch.common.bytes.BytesArray;
 import org.elasticsearch.search.SearchHit;
 import org.elasticsearch.search.SearchHits;
@@ -274,5 +280,132 @@ class SmtToSltUpgradeServiceImplTest {
         assertEquals(HttpStatus.OK, response.getResponseCode());
         assertEquals(1, response.get(Constants.SCANNED_COUNT));
         assertEquals(1, response.get(Constants.FAILED_COUNT));
+    }
+
+    private void stubSmtSearch(SearchUserApiResp searchResp) {
+        Map<String, Object> rawResponse = new HashMap<>();
+        rawResponse.put("dummy", "value");
+        when(outboundRequestHandlerService.fetchResultUsingPost(anyString(), anyMap(), eq(null)))
+                .thenReturn(rawResponse);
+        when(objectMapper.convertValue(rawResponse, SearchUserApiResp.class)).thenReturn(searchResp);
+    }
+
+    @Test
+    void shouldCountFailureWhenUpgradeApiCallThrows() {
+        stubSmtSearch(buildSmtSearchResponse(SMT_USER_ID));
+        service.enqueueSearchResult(buildSearchResponse(Arrays.asList(
+                batchSource("batch-1", 10), batchSource("batch-2", 10), batchSource("batch-3", 10))));
+        when(outboundRequestHandlerService.fetchResultUsingPatch(anyString(), any(), anyMap()))
+                .thenThrow(new RuntimeException("update api down"));
+
+        SBApiResponse response = service.runSmtToSltUpgradeCheck();
+
+        assertEquals(0, response.get(Constants.UPGRADED_COUNT));
+        assertEquals(1, response.get(Constants.FAILED_COUNT));
+    }
+
+    @Test
+    void shouldCountFailureWhenUpgradeApiReturnsEmptyResponse() {
+        stubSmtSearch(buildSmtSearchResponse(SMT_USER_ID));
+        service.enqueueSearchResult(buildSearchResponse(Collections.singletonList(batchSource("batch-1", 150))));
+        when(outboundRequestHandlerService.fetchResultUsingPatch(anyString(), any(), anyMap()))
+                .thenReturn(new HashMap<>());
+
+        SBApiResponse response = service.runSmtToSltUpgradeCheck();
+
+        assertEquals(1, response.get(Constants.FAILED_COUNT));
+    }
+
+    @Test
+    void shouldReturnZeroScannedWhenSearchResponseNotOk() {
+        SearchUserApiResp resp = buildSmtSearchResponse(SMT_USER_ID);
+        resp.setResponseCode("CLIENT_ERROR");
+        stubSmtSearch(resp);
+
+        SBApiResponse response = service.runSmtToSltUpgradeCheck();
+
+        assertEquals(0, response.get(Constants.SCANNED_COUNT));
+    }
+
+    @Test
+    void shouldReturnZeroScannedWhenSearchResponseIsNull() {
+        stubSmtSearch(null);
+
+        SBApiResponse response = service.runSmtToSltUpgradeCheck();
+
+        assertEquals(0, response.get(Constants.SCANNED_COUNT));
+    }
+
+    @Test
+    void shouldReturnZeroScannedWhenSearchResultMissing() {
+        SearchUserApiResp resp = new SearchUserApiResp();
+        resp.setResponseCode(Constants.OK);
+        stubSmtSearch(resp);
+
+        assertEquals(0, service.runSmtToSltUpgradeCheck().get(Constants.SCANNED_COUNT));
+    }
+
+    @Test
+    void shouldReturnZeroScannedWhenSearchResponseBodyMissing() {
+        SearchUserApiResp resp = new SearchUserApiResp();
+        resp.setResponseCode(Constants.OK);
+        resp.setResult(new SearchUserApiRespResult());
+        stubSmtSearch(resp);
+
+        assertEquals(0, service.runSmtToSltUpgradeCheck().get(Constants.SCANNED_COUNT));
+    }
+
+    @Test
+    void shouldReturnZeroScannedWhenSearchContentEmpty() {
+        stubSmtSearch(buildSmtSearchResponse());
+
+        assertEquals(0, service.runSmtToSltUpgradeCheck().get(Constants.SCANNED_COUNT));
+    }
+
+    @Test
+    void shouldSkipSmtUsersWithBlankUserId() {
+        stubSmtSearch(buildSmtSearchResponse(" "));
+
+        assertEquals(0, service.runSmtToSltUpgradeCheck().get(Constants.SCANNED_COUNT));
+    }
+
+    @Test
+    void shouldIgnoreBatchesWithoutIdAndNonNumericEnrolmentCount() {
+        stubSmtSearch(buildSmtSearchResponse(SMT_USER_ID));
+        Map<String, Object> noId = new HashMap<>();
+        noId.put(Constants.FIELD_ENROLMENT_COUNT, "many");
+        service.enqueueSearchResult(buildSearchResponse(Collections.singletonList(noId)));
+
+        SBApiResponse response = service.runSmtToSltUpgradeCheck();
+
+        assertEquals(1, response.get(Constants.SCANNED_COUNT));
+        assertEquals(0, response.get(Constants.UPGRADED_COUNT));
+        assertEquals(0, response.get(Constants.FAILED_COUNT));
+    }
+
+    @Test
+    void shouldDelegateSearchToEsClient() throws Exception {
+        String body = "{\"took\":1,\"timed_out\":false,\"_shards\":{\"total\":1,\"successful\":1,\"skipped\":0,"
+                + "\"failed\":0},\"hits\":{\"total\":0,\"max_score\":null,\"hits\":[]}}";
+        HttpServer esStub = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        esStub.createContext("/", exchange -> {
+            byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, bytes.length);
+            exchange.getResponseBody().write(bytes);
+            exchange.close();
+        });
+        esStub.start();
+        try (RestHighLevelClient esClient = new RestHighLevelClient(
+                RestClient.builder(new HttpHost("localhost", esStub.getAddress().getPort())))) {
+            SmtToSltUpgradeServiceImpl realService = new SmtToSltUpgradeServiceImpl(props,
+                    outboundRequestHandlerService, objectMapper, esClient);
+
+            SearchResponse response = realService.executeSearch(new SearchRequest("batch"));
+
+            assertEquals(0, response.getHits().getHits().length);
+        } finally {
+            esStub.stop(0);
+        }
     }
 }
