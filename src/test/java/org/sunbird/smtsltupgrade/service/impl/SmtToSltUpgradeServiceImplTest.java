@@ -41,7 +41,7 @@ import org.sunbird.common.util.Constants;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-public class SmtToSltUpgradeServiceImplTest {
+class SmtToSltUpgradeServiceImplTest {
 
     private static final String SMT_USER_ID = "eb05d807-8122-4d25-987f-6aad17a99107";
 
@@ -83,7 +83,7 @@ public class SmtToSltUpgradeServiceImplTest {
     }
 
     @BeforeEach
-    public void setUp() {
+    void setUp() {
         MockitoAnnotations.initMocks(this);
         service = new TestableSmtToSltUpgradeService(props, outboundRequestHandlerService, objectMapper);
         ReflectionTestUtils.setField(service, "smtRoleCode", "STATE_MASTER_TRAINER");
@@ -140,7 +140,7 @@ public class SmtToSltUpgradeServiceImplTest {
     }
 
     @Test
-    public void shouldReturnOkWithZeroScannedWhenNoSmtUsersFound() {
+    void shouldReturnOkWithZeroScannedWhenNoSmtUsersFound() {
         Map<String, Object> rawResponse = new HashMap<>();
         when(outboundRequestHandlerService.fetchResultUsingPost(anyString(), anyMap(), eq(null)))
                 .thenReturn(rawResponse);
@@ -155,7 +155,7 @@ public class SmtToSltUpgradeServiceImplTest {
     }
 
     @Test
-    public void shouldNotUpgradeWhenThresholdsNotMet() {
+    void shouldNotUpgradeWhenThresholdsNotMet() {
         Map<String, Object> rawResponse = new HashMap<>();
         rawResponse.put("dummy", "value");
         when(outboundRequestHandlerService.fetchResultUsingPost(anyString(), anyMap(), eq(null)))
@@ -174,7 +174,7 @@ public class SmtToSltUpgradeServiceImplTest {
     }
 
     @Test
-    public void shouldUpgradeUserWhenCompletedBatchThresholdMet() {
+    void shouldUpgradeUserWhenCompletedBatchThresholdMet() {
         Map<String, Object> rawResponse = new HashMap<>();
         rawResponse.put("dummy", "value");
         when(outboundRequestHandlerService.fetchResultUsingPost(anyString(), anyMap(), eq(null)))
@@ -202,7 +202,7 @@ public class SmtToSltUpgradeServiceImplTest {
     }
 
     @Test
-    public void shouldUpgradeUserWhenLearnersTrainedThresholdMet() {
+    void shouldUpgradeUserWhenLearnersTrainedThresholdMet() {
         Map<String, Object> rawResponse = new HashMap<>();
         rawResponse.put("dummy", "value");
         when(outboundRequestHandlerService.fetchResultUsingPost(anyString(), anyMap(), eq(null)))
@@ -223,7 +223,7 @@ public class SmtToSltUpgradeServiceImplTest {
     }
 
     @Test
-    public void shouldCountFailureWhenUpgradeApiCallFails() {
+    void shouldCountFailureWhenUpgradeApiCallFails() {
         Map<String, Object> rawResponse = new HashMap<>();
         rawResponse.put("dummy", "value");
         when(outboundRequestHandlerService.fetchResultUsingPost(anyString(), anyMap(), eq(null)))
@@ -248,7 +248,7 @@ public class SmtToSltUpgradeServiceImplTest {
     }
 
     @Test
-    public void shouldReturnInternalServerErrorWhenSmtLookupThrows() {
+    void shouldReturnInternalServerErrorWhenSmtLookupThrows() {
         when(outboundRequestHandlerService.fetchResultUsingPost(anyString(), anyMap(), eq(null)))
                 .thenThrow(new RuntimeException("search service down"));
 
@@ -259,7 +259,7 @@ public class SmtToSltUpgradeServiceImplTest {
     }
 
     @Test
-    public void shouldCountFailureWhenBatchLookupThrowsForOneUser() {
+    void shouldCountFailureWhenBatchLookupThrowsForOneUser() {
         Map<String, Object> rawResponse = new HashMap<>();
         rawResponse.put("dummy", "value");
         when(outboundRequestHandlerService.fetchResultUsingPost(anyString(), anyMap(), eq(null)))
