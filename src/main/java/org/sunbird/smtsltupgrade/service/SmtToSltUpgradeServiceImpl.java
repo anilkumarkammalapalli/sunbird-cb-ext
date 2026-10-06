@@ -1,4 +1,4 @@
-package org.sunbird.smtsltupgrade.service.impl;
+package org.sunbird.smtsltupgrade.service;
 
 import org.elasticsearch.action.search.SearchRequest;
 import org.elasticsearch.action.search.SearchResponse;
@@ -24,7 +24,6 @@ import org.sunbird.common.model.SearchUserApiResp;
 import org.sunbird.common.service.OutboundRequestHandlerServiceImpl;
 import org.sunbird.common.util.CbExtServerProperties;
 import org.sunbird.common.util.Constants;
-import org.sunbird.smtsltupgrade.service.SmtToSltUpgradeService;
 
 import java.io.IOException;
 import java.util.ArrayList;

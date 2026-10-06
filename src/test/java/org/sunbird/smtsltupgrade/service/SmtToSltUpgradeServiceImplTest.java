@@ -1,4 +1,4 @@
-package org.sunbird.smtsltupgrade.service.impl;
+package org.sunbird.smtsltupgrade.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
