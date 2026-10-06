@@ -82,42 +82,11 @@ public class SmtToSltUpgradeServiceImpl implements SmtToSltUpgradeService {
 
             for (String userId : smtUserIds) {
                 scannedCount++;
-                try {
-                    List<Map<String, Object>> completedBatches = fetchCompletedBatchesForUser(userId);
-
-                    // De-dupe in case the same batch matched more than one of
-                    // createdBy/mentors/coTrainers for this user (e.g. created it and is also a mentor).
-                    Set<Object> distinctBatchIds = new HashSet<>();
-                    int totalLearners = 0;
-                    for (Map<String, Object> batch : completedBatches) {
-                        Object batchId = batch.get(Constants.FIELD_BATCH_ID);
-                        if (batchId != null) {
-                            distinctBatchIds.add(batchId);
-                        }
-                        Object enrolmentCountObj = batch.get(Constants.FIELD_ENROLMENT_COUNT);
-                        if (enrolmentCountObj instanceof Number) {
-                            totalLearners += ((Number) enrolmentCountObj).intValue();
-                        }
-                    }
-
-                    int completedBatchCount = distinctBatchIds.size();
-                    logger.info("SmtToSltUpgradeJob: userId={} completedBatchCount={} totalLearners={}",
-                            userId, completedBatchCount, totalLearners);
-
-                    if (completedBatchCount >= minCompletedBatches || totalLearners >= minLearnersTrained) {
-                        boolean updated = upgradeUserToSlt(userId);
-                        if (updated) {
-                            upgradedCount++;
-                            logger.info("SmtToSltUpgradeJob: upgraded userId={} from SMT to SLT " +
-                                    "(completedBatchCount={}, totalLearners={})", userId, completedBatchCount, totalLearners);
-                        } else {
-                            failedCount++;
-                            logger.error("SmtToSltUpgradeJob: failed to upgrade userId={}", userId);
-                        }
-                    }
-                } catch (Exception ex) {
+                UpgradeOutcome outcome = evaluateAndUpgradeUser(userId);
+                if (outcome == UpgradeOutcome.UPGRADED) {
+                    upgradedCount++;
+                } else if (outcome == UpgradeOutcome.FAILED) {
                     failedCount++;
-                    logger.error("SmtToSltUpgradeJob: error evaluating userId={}", userId, ex);
                 }
             }
         } catch (Exception ex) {
@@ -132,6 +101,71 @@ public class SmtToSltUpgradeServiceImpl implements SmtToSltUpgradeService {
         response.put(Constants.FAILED_COUNT, failedCount);
         response.setResponseCode(HttpStatus.OK);
         return response;
+    }
+
+    private enum UpgradeOutcome {
+        UPGRADED, NOT_ELIGIBLE, FAILED
+    }
+
+    /**
+     * Evaluates a single SMT user's completed-batch stats and upgrades them to SLT if eligible.
+     * Any failure while evaluating/upgrading this user is contained here so one bad user
+     * doesn't abort the overall job run.
+     */
+    private UpgradeOutcome evaluateAndUpgradeUser(String userId) {
+        try {
+            List<Map<String, Object>> completedBatches = fetchCompletedBatchesForUser(userId);
+            BatchStats stats = summarizeBatchStats(completedBatches);
+            logger.info("SmtToSltUpgradeJob: userId={} completedBatchCount={} totalLearners={}",
+                    userId, stats.completedBatchCount, stats.totalLearners);
+
+            if (stats.completedBatchCount < minCompletedBatches && stats.totalLearners < minLearnersTrained) {
+                return UpgradeOutcome.NOT_ELIGIBLE;
+            }
+
+            if (upgradeUserToSlt(userId)) {
+                logger.info("SmtToSltUpgradeJob: upgraded userId={} from SMT to SLT "
+                        + "(completedBatchCount={}, totalLearners={})", userId, stats.completedBatchCount,
+                        stats.totalLearners);
+                return UpgradeOutcome.UPGRADED;
+            }
+            logger.error("SmtToSltUpgradeJob: failed to upgrade userId={}", userId);
+            return UpgradeOutcome.FAILED;
+        } catch (Exception ex) {
+            logger.error("SmtToSltUpgradeJob: error evaluating userId={}", userId, ex);
+            return UpgradeOutcome.FAILED;
+        }
+    }
+
+    private static class BatchStats {
+        private final int completedBatchCount;
+        private final int totalLearners;
+
+        private BatchStats(int completedBatchCount, int totalLearners) {
+            this.completedBatchCount = completedBatchCount;
+            this.totalLearners = totalLearners;
+        }
+    }
+
+    /**
+     * De-dupes batches in case the same batch matched more than one of
+     * createdBy/mentors/coTrainers for this user (e.g. created it and is also a mentor),
+     * and sums up the learners trained across those distinct batches.
+     */
+    private BatchStats summarizeBatchStats(List<Map<String, Object>> completedBatches) {
+        Set<Object> distinctBatchIds = new HashSet<>();
+        int totalLearners = 0;
+        for (Map<String, Object> batch : completedBatches) {
+            Object batchId = batch.get(Constants.FIELD_BATCH_ID);
+            if (batchId != null) {
+                distinctBatchIds.add(batchId);
+            }
+            Object enrolmentCountObj = batch.get(Constants.FIELD_ENROLMENT_COUNT);
+            if (enrolmentCountObj instanceof Number) {
+                totalLearners += ((Number) enrolmentCountObj).intValue();
+            }
+        }
+        return new BatchStats(distinctBatchIds.size(), totalLearners);
     }
 
     /**
